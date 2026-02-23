@@ -14,6 +14,9 @@
 * limitations under the License.
 *******************************************************************************/
 
+#include <mutex>
+#include <unordered_map>
+
 #include "common/c_types_map.hpp"
 
 #include "gpu/intel/compute/kernel.hpp"
@@ -28,19 +31,26 @@ namespace intel {
 
 status_t fill_random(impl::stream_t *stream, size_t size,
         impl::memory_t *memory, int buffer_index, uint32_t seed) {
-    static compute::kernel_t kernel;
-    static std::once_flag flag;
+    static std::unordered_map<engine_id_t, compute::kernel_t> kernel_cache;
+    static std::mutex kernel_cache_mutex;
 
     auto *intel_stream = utils::downcast<intel::stream_t *>(stream);
     auto *intel_engine = utils::downcast<intel::engine_t *>(stream->engine());
 
-    std::call_once(flag, [&]() {
-        compute::kernel_ctx_t ctx;
-        std::vector<compute::kernel_t> kernels;
-        UNUSED_STATUS(
-                intel_engine->create_kernels(&kernels, {"fill_random"}, ctx));
-        kernel = kernels[0];
-    });
+    compute::kernel_t kernel;
+    {
+        std::lock_guard<std::mutex> lock(kernel_cache_mutex);
+        auto it = kernel_cache.find(intel_engine->engine_id());
+        if (it == kernel_cache.end()) {
+            compute::kernel_ctx_t ctx;
+            std::vector<compute::kernel_t> kernels;
+            UNUSED_STATUS(intel_engine->create_kernels(
+                    &kernels, {"fill_random"}, ctx));
+            it = kernel_cache.emplace(intel_engine->engine_id(), kernels[0])
+                         .first;
+        }
+        kernel = it->second;
+    }
 
     if (size == 0) return status::success;
     const uint32_t num_work_items = static_cast<uint32_t>((size + 3) / 4);
