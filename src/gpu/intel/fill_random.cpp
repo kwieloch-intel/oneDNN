@@ -29,30 +29,29 @@ namespace impl {
 namespace gpu {
 namespace intel {
 
+static compute::kernel_t get_cached_kernel(intel::engine_t *engine) {
+    static std::unordered_map<engine_id_t, compute::kernel_t> cache;
+    static std::mutex mutex;
+
+    std::lock_guard<std::mutex> lock(mutex);
+    auto it = cache.find(engine->engine_id());
+    if (it != cache.end()) return it->second;
+
+    compute::kernel_ctx_t ctx;
+    std::vector<compute::kernel_t> kernels;
+    UNUSED_STATUS(engine->create_kernels(&kernels, {"fill_random"}, ctx));
+    return cache.emplace(engine->engine_id(), kernels[0]).first->second;
+}
+
 status_t fill_random(impl::stream_t *stream, size_t size,
         impl::memory_t *memory, int buffer_index, uint32_t seed) {
-    static std::unordered_map<engine_id_t, compute::kernel_t> kernel_cache;
-    static std::mutex kernel_cache_mutex;
+    if (size == 0) return status::success;
 
     auto *intel_stream = utils::downcast<intel::stream_t *>(stream);
     auto *intel_engine = utils::downcast<intel::engine_t *>(stream->engine());
 
-    compute::kernel_t kernel;
-    {
-        std::lock_guard<std::mutex> lock(kernel_cache_mutex);
-        auto it = kernel_cache.find(intel_engine->engine_id());
-        if (it == kernel_cache.end()) {
-            compute::kernel_ctx_t ctx;
-            std::vector<compute::kernel_t> kernels;
-            UNUSED_STATUS(intel_engine->create_kernels(
-                    &kernels, {"fill_random"}, ctx));
-            it = kernel_cache.emplace(intel_engine->engine_id(), kernels[0])
-                         .first;
-        }
-        kernel = it->second;
-    }
+    auto kernel = get_cached_kernel(intel_engine);
 
-    if (size == 0) return status::success;
     const uint32_t num_work_items = static_cast<uint32_t>((size + 3) / 4);
 
     compute::range_t gws = {num_work_items, 1, 1};
