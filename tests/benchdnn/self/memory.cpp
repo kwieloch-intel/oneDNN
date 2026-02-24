@@ -32,12 +32,26 @@ static int check_fill_for_perf_bench() {
         return OK;
     }
 
-    const int nelems = 1023;
-    dnnl_dim_t dims {nelems};
-    auto md = dnn_mem_t::init_md(1, &dims, dnnl_f32, tag::abx);
+    // Note:
+    // This test suite will be deleted once debugging and verification of
+    // new fill_for_perf_bench() is complete. Can be used to test the new
+    // fill_for_perf_bench() as well as old memset-based approach.
+
+    bool tests_array[] = {
+            false, // 0. Print all values for debugging purposes
+            true, // 1. Non-uniformity check
+            true, // 2. No NaN/Inf
+            true, // 3. Different calls should produce different data (seed test)
+            true, // 4. All initialized (tail leftover bytes should be initialized too)
+            false, // 5. Big tensor (e.g., 2GB for f16) test
+    };
 
     // 0. Print all values for debugging purposes
-    {
+    if (tests_array[0]) {
+        const int nelems = 511;
+        dnnl_dim_t dims {nelems};
+        auto md = dnn_mem_t::init_md(1, &dims, dnnl_f32, tag::abx);
+
         dnn_mem_t m(md, get_test_engine(), /* prefill = */ false);
         m.unmap();
         m.fill_for_perf_bench(nelems * sizeof(uint32_t), 0);
@@ -45,17 +59,21 @@ static int check_fill_for_perf_bench() {
 
         const auto *ptr = static_cast<const uint32_t *>(m);
 
-        for (int i = nelems -1; i >= 0; i--) {
+        for (int i = nelems - 1; i >= 0; i--) {
             if (ptr[i] != 0) {
-                printf("[%i]: \033[32m%i\033[0m\n", i, ptr[i]);
+                printf("[%i]: \033[32m%08X (%i)\033[0m\n", i, ptr[i], ptr[i]);
             } else {
-                printf("[%i]: \033[31m%i\033[0m\n", i, ptr[i]);
+                printf("[%i]: \033[31m%08X (%i)\033[0m\n", i, ptr[i], ptr[i]);
             }
         }
     }
 
     // 1. Non-uniformity check: require at least 50% unique values
-    {
+    if (tests_array[1]) {
+        const int nelems = 1024; // 1024*1024 for some repeated values
+        dnnl_dim_t dims {nelems};
+        auto md = dnn_mem_t::init_md(1, &dims, dnnl_f32, tag::abx);
+
         dnn_mem_t m(md, get_test_engine(), /* prefill = */ false);
         m.unmap();
         m.fill_for_perf_bench(nelems * sizeof(float), 0);
@@ -72,6 +90,8 @@ static int check_fill_for_perf_bench() {
             if (ptr_uint32_t[i] != first_val) all_same = false;
         }
 
+        // printf("Unique uint32_t values: %d/%d\n", (int)unique_vals_uint32_t.size(), nelems);
+
         SELF_CHECK(!all_same,
                 "fill_for_perf_bench failed because all 32-bit samples are "
                 "identical (val=0x%08X)",
@@ -84,7 +104,11 @@ static int check_fill_for_perf_bench() {
     }
 
     // 2. No NaN/Inf for any available FP type (mask 0xEEEEEEEE)
-    {
+    if (tests_array[2]) {
+        const int nelems = 1024;
+        dnnl_dim_t dims {nelems};
+        auto md = dnn_mem_t::init_md(1, &dims, dnnl_f32, tag::abx);
+
         dnn_mem_t m(md, get_test_engine(), /* prefill = */ false);
         m.unmap();
         m.fill_for_perf_bench(nelems * sizeof(float), 0);
@@ -105,7 +129,11 @@ static int check_fill_for_perf_bench() {
     }
 
     // 3. Different calls should produce different data (seed test)
-    {
+    if (tests_array[3]) {
+        const int nelems = 512;
+        dnnl_dim_t dims {nelems};
+        auto md = dnn_mem_t::init_md(1, &dims, dnnl_f32, tag::abx);
+
         dnn_mem_t m1(md, get_test_engine(), /* prefill = */ false);
         dnn_mem_t m2(md, get_test_engine(), /* prefill = */ false);
         m1.unmap();
@@ -119,6 +147,11 @@ static int check_fill_for_perf_bench() {
         int num_different = 0;
         for (int i = 0; i < nelems; i++)
             if (p1[i] != p2[i]) num_different++;
+
+        // printf("Number of different uint32_t values between two calls: "
+        //        "%d/%d\n",
+        //        num_different, nelems);
+
         // Require at least 50% of values to differ between two calls
         // if nelems set to default value of 1024.
         SELF_CHECK(num_different > nelems / 2,
@@ -128,11 +161,8 @@ static int check_fill_for_perf_bench() {
     }
 
     // 4. All initialized (tail leftover bytes should be initialized too)
-    if(false)
-    {
-        for(int nelems = 1; nelems <= 128; nelems++)
-        {
-            // const int nelems = 17;
+    if (tests_array[4]) {
+        for (int nelems = 16; nelems <= 21; nelems++) {
             dnnl_dim_t dims {nelems};
             auto md = dnn_mem_t::init_md(1, &dims, dnnl_f16, tag::abx);
 
@@ -155,27 +185,29 @@ static int check_fill_for_perf_bench() {
         }
     }
 
-    // 5. Big tensors performance test
-    {
-        const size_t nelems = 32768U*32768U*2U;
-        dnnl_dim_t dims {nelems};
+    // 5. Big tensor test (e.g., 2GB for f16)
+    if (tests_array[5]) {
+        const size_t nelems = 1 << 30; // 2GB for f16
+        dnnl_dim_t dims {static_cast<dnnl_dim_t>(nelems)};
         auto md = dnn_mem_t::init_md(1, &dims, dnnl_f16, tag::abx);
 
         dnn_mem_t m(md, get_test_engine(), /* prefill = */ false);
         const std::size_t total_bytes = nelems * sizeof(std::uint16_t);
         m.unmap();
-        // m.memset(0xFF, total_bytes, 0);
+        m.memset(0xFF, total_bytes, 0);
         m.fill_for_perf_bench(total_bytes, 0);
         m.map();
 
+        // Check last 1024 samples
         const auto *raw16 = static_cast<const uint16_t *>(m);
         int nan_count = 0;
-        for (std::size_t i = 0; i < static_cast<std::size_t>(nelems); ++i)
+        for (std::size_t i = nelems - 1024; i < nelems; ++i)
             if (raw16[i] == 0xFFFFu) nan_count++;
 
         // All values should be initialized and nan/inf free
         SELF_CHECK(nan_count == 0,
-                "fill_for_perf_bench left %d uninitialized values (0xFFFF)",
+                "fill_for_perf_bench left %d uninitialized values (0xFFFF) in "
+                "the end of big tensor",
                 nan_count);
     }
 

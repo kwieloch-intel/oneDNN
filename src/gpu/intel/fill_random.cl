@@ -41,16 +41,19 @@ __kernel void fill_random_vec(__global uint *buf, uint seed, uint byte_count) {
     const uint elem_count = byte_count >> 2;
     SIMD_VECTOR vec;
 
-    #pragma unroll BLOCK_SIZE / SIMD_WIDTH
+#pragma unroll BLOCK_SIZE / SIMD_WIDTH
     for (int i = 0; i < BLOCK_SIZE; i += SIMD_WIDTH) {
         uint offset = id + i;
 
         // Generate a vector of 4 random values using Philox.
-        #pragma unroll SIMD_WIDTH / 4
+#pragma unroll SIMD_WIDTH / 4
         for (int k = 0; k < SIMD_WIDTH; k += 4) {
             uint base = offset + k;
             uint4 rnd = philox_4x32_vec4(base, base ^ seed);
-            vec[k] = rnd.s0; vec[k+1] = rnd.s1; vec[k+2] = rnd.s2; vec[k+3] = rnd.s3;
+            vec[k] = rnd.s0;
+            vec[k + 1] = rnd.s1;
+            vec[k + 2] = rnd.s2;
+            vec[k + 3] = rnd.s3;
         }
         vec &= (SIMD_VECTOR)(0xEEEEEEEEu);
 
