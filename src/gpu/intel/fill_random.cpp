@@ -127,10 +127,12 @@ status_t fill_random_vec(impl::stream_t *stream, size_t size,
     auto *intel_stream = utils::downcast<intel::stream_t *>(stream);
     auto *intel_engine = utils::downcast<intel::engine_t *>(stream->engine());
 
-    int block_size= 32, simd_width = 16;
+    // Available SIMD_WIDTH = {4, 8, 16}
+    // Available BLOCK_SIZE = k * SIMD_WIDTH, where k is a small positive integer (e.g., 1, 2, 4, 8).
+    int block_size= 64, simd_width = 16;
     auto kernel = get_cached_kernel_vec(intel_engine, block_size, simd_width);
 
-    const size_t num_work_items = ceil_div(size / 4, block_size);
+    const size_t num_work_items = ceil_div(size, block_size * 4);
     printf("fill_random_vec: size=%zu, size/4=%zu, num_work_items=%zu\n", size, size / 4, num_work_items);
 
     compute::range_t gws = {num_work_items, 1, 1};
@@ -154,6 +156,6 @@ status_t fill_random_vec(impl::stream_t *stream, size_t size,
 extern "C" dnnl::impl::status_t DNNL_API dnnl_impl_gpu_fill_random(
         dnnl::impl::stream_t *stream, size_t size, dnnl::impl::memory_t *memory,
         int buffer_index, uint32_t seed) {
-    return dnnl::impl::gpu::intel::fill_random(
+    return dnnl::impl::gpu::intel::fill_random_vec(
             stream, size, memory, buffer_index, seed);
 }
