@@ -73,7 +73,7 @@ status_t fill_random(impl::stream_t *stream, size_t size,
     compute::kernel_arg_list_t arg_list;
     arg_list.set(0, *memory->memory_storage(buffer_index));
     arg_list.set(1, seed);
-    arg_list.set(2, static_cast<uint32_t>(size));
+    arg_list.set(2, static_cast<uint64_t>(size));
 
     CHECK(kernel.parallel_for(*stream, nd_range, arg_list,
             intel_stream->ctx().get_deps(), intel_stream->ctx().get_deps()));

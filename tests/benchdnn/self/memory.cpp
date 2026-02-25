@@ -185,30 +185,30 @@ static int check_fill_for_perf_bench() {
         }
     }
 
-    // 5. Big tensor test (e.g., 2GB for f16)
+    // 5. Big tensor test: 4GB+1 bytes (u8) to catch uint32 overflow.
     if (tests_array[5]) {
-        const size_t nelems = 1 << 30; // 2GB for f16
+        const size_t nelems = (1ULL << 32) + 1; // 4GB + 1 byte
         dnnl_dim_t dims {static_cast<dnnl_dim_t>(nelems)};
-        auto md = dnn_mem_t::init_md(1, &dims, dnnl_f16, tag::abx);
+        auto md = dnn_mem_t::init_md(1, &dims, dnnl_u8, tag::abx);
 
         dnn_mem_t m(md, get_test_engine(), /* prefill = */ false);
-        const std::size_t total_bytes = nelems * sizeof(std::uint16_t);
+        const std::size_t total_bytes = nelems * sizeof(std::uint8_t);
         m.unmap();
         m.memset(0xFF, total_bytes, 0);
         m.fill_for_perf_bench(total_bytes, 0);
         m.map();
 
         // Check last 1024 samples
-        const auto *raw16 = static_cast<const uint16_t *>(m);
-        int nan_count = 0;
+        const auto *raw8 = static_cast<const uint8_t *>(m);
+        int uninit_count = 0;
         for (std::size_t i = nelems - 1024; i < nelems; ++i)
-            if (raw16[i] == 0xFFFFu) nan_count++;
+            if (raw8[i] == 0xFFu) uninit_count++;
 
-        // All values should be initialized and nan/inf free
-        SELF_CHECK(nan_count == 0,
-                "fill_for_perf_bench left %d uninitialized values (0xFFFF) in "
+        // All values should be initialized
+        SELF_CHECK(uninit_count == 0,
+                "fill_for_perf_bench left %d uninitialized values (0xFF) in "
                 "the end of big tensor",
-                nan_count);
+                uninit_count);
     }
 
     return OK;
