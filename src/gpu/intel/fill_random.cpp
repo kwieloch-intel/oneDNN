@@ -32,6 +32,9 @@ namespace intel {
 // Set to true to use the reference kernel.
 static constexpr bool use_ref_kernel = false;
 
+// Set to true to replace Philox with a cheap hash (perf testing only).
+static constexpr bool use_cheap_rng = true;
+
 // Vectorized kernel compile-time parameters.
 static constexpr int simd_width = 4; // in {4, 8, 16}
 static constexpr int block_size = 4; // k * simd_width, k in {1, 2, 4, ...}
@@ -53,6 +56,7 @@ static compute::kernel_t get_cached_kernel(intel::engine_t *engine) {
     ctx.define_int("SIMD_WIDTH", simd_width);
     ctx.add_option("-DSIMD_VECTOR=uint" + std::to_string(simd_width));
     ctx.add_option("-DSIMD_STORE=vstore" + std::to_string(simd_width));
+    if (use_cheap_rng) ctx.add_option("-DCHEAP_RNG");
 
     std::vector<compute::kernel_t> kernels;
     const char *name = use_ref_kernel ? "fill_random" : "fill_random_vec";
@@ -75,8 +79,15 @@ status_t fill_random(impl::stream_t *stream, size_t size,
     arg_list.set(1, seed);
     arg_list.set(2, static_cast<uint64_t>(size));
 
+    LARGE_INTEGER freq, start, end;
+QueryPerformanceFrequency(&freq);
+QueryPerformanceCounter(&start);
     CHECK(kernel.parallel_for(*stream, nd_range, arg_list,
             intel_stream->ctx().get_deps(), intel_stream->ctx().get_deps()));
+            stream->wait();
+QueryPerformanceCounter(&end);
+double ms = (end.QuadPart - start.QuadPart) * 1000.0 / freq.QuadPart;
+printf("%.3f\n", ms);
     return status::success;
 }
 

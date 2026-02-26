@@ -33,6 +33,18 @@ __kernel void fill_random(__global uint *buf, uint seed, ulong byte_count) {
     }
 }
 
+#ifdef CHEAP_RNG
+// Fast stateless hash based on MurmurHash3 finalizer (fmix32).
+// Source: Austin Appleby's SMHasher (https://github.com/aappleby/smhasher)
+// License: Public Domain. Fully free for commercial and non-commercial use.
+inline uint4 murmur_hash_vec4(uint base, uint seed) {
+    uint4 h = (uint4)(base, base + 1, base + 2, base + 3) ^ seed;
+    h = (h ^ (h >> 16)) * 0x85ebca6bu;
+    h = (h ^ (h >> 13)) * 0xc2b2ae35u;
+    return h ^ (h >> 16);
+}
+#endif
+
 #ifdef SIMD_WIDTH
 // Fills a buffer with pseudo-random uint32 values using the Philox RNG,
 // can use SIMD instruction and block processing for better performance.
@@ -49,7 +61,11 @@ __kernel void fill_random_vec(__global uint *buf, uint seed, ulong byte_count) {
 #pragma unroll SIMD_WIDTH / 4
         for (int k = 0; k < SIMD_WIDTH; k += 4) {
             uint base = (uint)(offset + k);
+#ifdef CHEAP_RNG
+            uint4 rnd = murmur_hash_vec4(base, base ^ seed);
+#else
             uint4 rnd = philox_4x32_vec4(base, base ^ seed);
+#endif
             vec[k] = rnd.s0;
             vec[k + 1] = rnd.s1;
             vec[k + 2] = rnd.s2;

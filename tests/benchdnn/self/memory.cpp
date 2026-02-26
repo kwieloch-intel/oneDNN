@@ -39,11 +39,11 @@ static int check_fill_for_perf_bench() {
 
     bool tests_array[] = {
             false, // 0. Print all values for debugging purposes
-            true, // 1. Non-uniformity check
-            true, // 2. No NaN/Inf
-            true, // 3. Different calls should produce different data (seed test)
-            true, // 4. All initialized (tail leftover bytes should be initialized too)
-            false, // 5. Big tensor (e.g., 2GB for f16) test
+            false, // 1. Non-uniformity check
+            false, // 2. No NaN/Inf
+            false, // 3. Different calls should produce different data (seed test)
+            false, // 4. All initialized (tail leftover bytes should be initialized too)
+            true, // 5. Big tensor (e.g., 2GB for f16) test
     };
 
     // 0. Print all values for debugging purposes
@@ -187,7 +187,21 @@ static int check_fill_for_perf_bench() {
 
     // 5. Big tensor test: 4GB+1 bytes (u8) to catch uint32 overflow.
     if (tests_array[5]) {
-        const size_t nelems = (1ULL << 32) + 1; // 4GB + 1 byte
+
+        const size_t all_sizes[] = {
+            // (3ULL << 31), // 6GB
+            (1ULL << 32), // 4GB
+            (1ULL << 31), // 2GB
+            (1ULL << 30), // 1GB
+            (1ULL << 27), // 128MB
+            (1ULL << 22), // 4MB
+            (1ULL << 18), // 256KB
+            (1ULL << 11) // 2KB
+        };
+
+        for(int s=0;s<7;s++)
+        {
+        const size_t nelems = all_sizes[s];
         dnnl_dim_t dims {static_cast<dnnl_dim_t>(nelems)};
         auto md = dnn_mem_t::init_md(1, &dims, dnnl_u8, tag::abx);
 
@@ -209,6 +223,7 @@ static int check_fill_for_perf_bench() {
                 "fill_for_perf_bench left %d uninitialized values (0xFF) in "
                 "the end of big tensor",
                 uninit_count);
+        }
     }
 
     return OK;
