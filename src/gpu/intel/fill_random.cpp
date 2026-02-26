@@ -33,8 +33,8 @@ namespace intel {
 static constexpr bool use_ref_kernel = false;
 
 // Vectorized kernel compile-time parameters.
-static constexpr int simd_width = 16; // in {4, 8, 16}
-static constexpr int block_size = 64; // k * simd_width, k in {1, 2, 4, ...}
+static constexpr int simd_width = 4; // in {4, 8, 16}
+static constexpr int block_size = 4; // k * simd_width, k in {1, 2, 4, ...}
 
 inline size_t ceil_div(size_t x, size_t y) {
     return (x + y - 1) / y;
