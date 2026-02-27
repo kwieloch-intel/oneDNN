@@ -18,6 +18,7 @@
 #include <unordered_map>
 
 #include "common/c_types_map.hpp"
+#include "common/utils.hpp"
 
 #include "gpu/intel/compute/kernel.hpp"
 #include "gpu/intel/compute/kernel_ctx.hpp"
@@ -35,10 +36,6 @@ static constexpr bool use_ref_kernel = false;
 // Vectorized kernel compile-time parameters.
 static constexpr int simd_width = 4; // in {4, 8, 16}
 static constexpr int block_size = 4; // k * simd_width, k in {1, 2, 4, ...}
-
-inline size_t ceil_div(size_t x, size_t y) {
-    return (x + y - 1) / y;
-}
 
 static compute::kernel_t get_cached_kernel(intel::engine_t *engine) {
     static std::unordered_map<engine_id_t, compute::kernel_t> cache;
@@ -69,7 +66,7 @@ status_t fill_random(impl::stream_t *stream, size_t size,
     auto kernel = get_cached_kernel(intel_engine);
 
     const size_t bytes_per_item = use_ref_kernel ? 4 : block_size * 4;
-    compute::nd_range_t nd_range({ceil_div(size, bytes_per_item), 1, 1});
+    compute::nd_range_t nd_range({utils::div_up(size, bytes_per_item), 1, 1});
     compute::kernel_arg_list_t arg_list;
     arg_list.set(0, *memory->memory_storage(buffer_index));
     arg_list.set(1, seed);
