@@ -611,17 +611,20 @@ void dnn_mem_t::memset(int value, size_t size, int buffer_index) const {
     SAFE_V(FAIL);
 }
 
-// Fills device memory with pseudo-random data generated directly on the device.
+// Fills buffer with pseudo-random data generated directly on the device.
 // This mitigates the impact of GPU driver data compression, which could yield
-// unrealistically high bandwidth measurements in mode=F. If the GPU runtime is
-// unavailable or a CPU engine is used, the function defaults to memset.
-#if DNNL_INTEL_GPU_RUNTIME_ENABLED
+// unrealistically high bandwidth measurements in mode=F. Defaults to "memset"
+// when non-Intel GPU runtime or CPU runtime is used.
+#if (DNNL_GPU_RUNTIME != DNNL_RUNTIME_NONE \
+        && DNNL_GPU_VENDOR == DNNL_VENDOR_INTEL)
 extern "C" dnnl_status_t dnnl_impl_gpu_fill_random(dnnl_stream_t stream,
         size_t size, dnnl_memory_t memory, int buffer_index, uint32_t seed);
 #endif
 
 void dnn_mem_t::fill_for_perf_bench(size_t size, int buffer_index) const {
-#if DNNL_INTEL_GPU_RUNTIME_ENABLED
+
+#if (DNNL_GPU_RUNTIME != DNNL_RUNTIME_NONE \
+        && DNNL_GPU_VENDOR == DNNL_VENDOR_INTEL)
     static std::atomic<uint32_t> call_counter {0};
     const uint32_t seed = call_counter.fetch_add(1, std::memory_order_relaxed);
     if (!is_cpu(engine_)) {

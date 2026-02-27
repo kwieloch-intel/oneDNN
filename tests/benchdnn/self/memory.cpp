@@ -25,7 +25,9 @@ namespace self {
 // Verifies that fill_for_perf_bench() produces non-uniform, finite,
 // nan-free, inf-free, and seed-varying valid data for mode=F.
 static int check_fill_for_perf_bench() {
-    if (!DNNL_INTEL_GPU_RUNTIME_ENABLED || is_cpu(get_test_engine())) {
+    if (!(DNNL_GPU_RUNTIME != DNNL_RUNTIME_NONE
+                && DNNL_GPU_VENDOR == DNNL_VENDOR_INTEL)
+            || is_cpu(get_test_engine())) {
         BENCHDNN_PRINT(2, "%s\n",
                 "Skipping fill_for_perf_bench checks due to the use of a "
                 "non-Intel GPU runtime or a CPU runtime.");
