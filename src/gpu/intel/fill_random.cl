@@ -18,64 +18,20 @@
 #include "gpu/intel/include/philox.h"
 
 // Fills a buffer with pseudo-random uint32 values using the Philox RNG.
+// Each work item processes 16 bytes (4 x uint32) using Philox vec4.
 __kernel void fill_random(__global uint *buf, uint seed, ulong byte_count) {
-    ulong gid = get_global_id(0);
-    uint value = philox_4x32((uint)gid, (uint)gid ^ seed) & 0xEEEEEEEEu;
+    ulong start = get_global_id(0) * 16;
+    if (start >= byte_count) return;
 
-    if (gid < (byte_count >> 2)) {
-        buf[gid] = value;
+    uint b = (uint)(start >> 2);
+    uint4 rnd = philox_4x32_vec4(b, b ^ seed) & (uint4)(0xEEEEEEEEu);
+
+    if (start + 16 <= byte_count) {
+        vstore4(rnd, get_global_id(0), buf);
     } else {
-        __global uchar *p = (__global uchar *)(buf + gid);
-        ulong tail = byte_count & 3;
-        if (tail > 0) p[0] = (uchar)value;
-        if (tail > 1) p[1] = (uchar)(value >> 8);
-        if (tail > 2) p[2] = (uchar)(value >> 16);
+        __global uchar *p = (__global uchar *)buf;
+        uint r[4] = {rnd.s0, rnd.s1, rnd.s2, rnd.s3};
+        for (ulong i = 0; i < byte_count - start; ++i)
+            p[start + i] = (uchar)(r[i / 4] >> ((i % 4) * 8));
     }
 }
-
-#ifdef SIMD_WIDTH
-// Fills a buffer with pseudo-random uint32 values using the Philox RNG,
-// can use SIMD instruction and block processing for better performance.
-__kernel void fill_random_vec(__global uint *buf, uint seed, ulong byte_count) {
-    const ulong id = get_global_id(0) * BLOCK_SIZE;
-    const ulong elem_count = byte_count >> 2;
-    SIMD_VECTOR vec;
-
-    unroll_for(int i = 0; i < BLOCK_SIZE; i += SIMD_WIDTH) {
-        ulong offset = id + i;
-
-        // Generate a vector of 4 random values using Philox.
-        unroll_for(int k = 0; k < SIMD_WIDTH; k += 4) {
-            uint base = (uint)(offset + k);
-            uint4 rnd = philox_4x32_vec4(base, base ^ seed);
-            vec[k] = rnd.s0;
-            vec[k + 1] = rnd.s1;
-            vec[k + 2] = rnd.s2;
-            vec[k + 3] = rnd.s3;
-        }
-        vec &= (SIMD_VECTOR)(0xEEEEEEEEu);
-
-        // Regular case: full SIMD (SIMD_WIDTH) vector store.
-        if (offset + SIMD_WIDTH <= elem_count) {
-            SIMD_STORE(vec, 0, buf + offset);
-            continue;
-        }
-
-        // Tail: store samples that don't fit a full SIMD vector.
-        long remaining = elem_count - offset;
-        for (int k = 0; k < remaining; k++)
-            buf[offset + k] = vec[k];
-
-        // Tail: store bytes that don't fit a single 32-bit uint.
-        ulong tail = byte_count & 3;
-        if (tail > 0) {
-            __global uchar *p = (__global uchar *)(buf + offset + remaining);
-            uint value = vec[remaining];
-            p[0] = (uchar)value;
-            if (tail > 1) p[1] = (uchar)(value >> 8);
-            if (tail > 2) p[2] = (uchar)(value >> 16);
-        }
-        return;
-    }
-}
-#endif
