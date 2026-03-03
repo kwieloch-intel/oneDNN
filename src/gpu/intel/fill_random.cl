@@ -18,7 +18,7 @@
 #include "gpu/intel/include/philox.h"
 
 // Fills a buffer with pseudo-random data using Philox RNG and subgroup block
-// writes. Each subgroup (16 work-items) writes 256 bytes per invocation.
+// writes. Each subgroup (16 work-items) writes 256 bytes.
 #define SG_SIZE 16
 #define BYTES_PER_SG (SG_SIZE * 4 * 4)
 
