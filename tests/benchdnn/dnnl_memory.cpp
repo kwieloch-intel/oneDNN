@@ -625,8 +625,7 @@ void dnn_mem_t::fill_for_perf_bench(size_t size, int buffer_index) const {
 
 #if (DNNL_GPU_RUNTIME != DNNL_RUNTIME_NONE \
         && DNNL_GPU_VENDOR == DNNL_VENDOR_INTEL)
-    static std::atomic<uint32_t> call_counter {0};
-    const uint32_t seed = call_counter.fetch_add(1, std::memory_order_relaxed);
+    const uint32_t seed = 0;
     if (!is_cpu(engine_)) {
         auto mem = m_padded_ ? m_padded_ : m_;
         stream_t stream(engine_);
