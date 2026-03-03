@@ -17,21 +17,28 @@
 #define DT_UNDEF 1
 #include "gpu/intel/include/philox.h"
 
-// Fills a buffer with pseudo-random uint32 values using the Philox RNG.
-// Each work item processes 16 bytes (4 x uint32) using Philox vec4.
-__kernel void fill_random(__global uint *buf, uint seed, ulong byte_count) {
-    ulong start = get_global_id(0) * 16;
-    if (start >= byte_count) return;
+// Fills a buffer with pseudo-random data using Philox RNG and subgroup block
+// writes. Each subgroup (16 work-items) writes 256 bytes per invocation.
+#define SG_SIZE 16
+#define BYTES_PER_SG (SG_SIZE * 4 * 4)
 
-    uint b = (uint)(start >> 2);
-    uint4 rnd = philox_4x32_vec4(b, b ^ seed) & (uint4)(0xEEEEEEEEu);
+__attribute__((intel_reqd_sub_group_size(SG_SIZE))) __kernel void fill_random(
+        __global uchar *buf, uint seed, ulong byte_count) {
+    const ulong base = (get_global_id(0) / SG_SIZE) * BYTES_PER_SG;
+    if (base >= byte_count) return;
 
-    if (start + 16 <= byte_count) {
-        vstore4(rnd, get_global_id(0), buf);
-    } else {
-        __global uchar *p = (__global uchar *)buf;
-        uint r[4] = {rnd.s0, rnd.s1, rnd.s2, rnd.s3};
-        for (ulong i = 0; i < byte_count - start; ++i)
-            p[start + i] = (uchar)(r[i / 4] >> ((i % 4) * 8));
+    const uint b = (uint)get_global_id(0) * 4;
+    uchar16 rnd
+            = as_uchar16(philox_4x32_vec4(b, b ^ seed) & (uint4)(0xEEEEEEEEu));
+
+    if (base + BYTES_PER_SG <= byte_count) {
+        intel_sub_group_block_write_uc16(buf + base, rnd);
+        return;
+    }
+
+    const uint lid = get_sub_group_local_id();
+    for (int i = 0; i < 16; i++) {
+        ulong off = base + lid + (ulong)i * SG_SIZE;
+        if (off < byte_count) buf[off] = rnd[i];
     }
 }

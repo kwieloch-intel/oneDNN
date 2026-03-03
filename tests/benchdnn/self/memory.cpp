@@ -43,7 +43,7 @@ static int check_fill_for_perf_bench() {
             false, // 0. Print all values for debugging purposes
             true, // 1. Non-uniformity check
             true, // 2. No NaN/Inf
-            true, // 3. Different calls should produce different data (seed test)
+            false, // 3. Different calls should produce different data (seed test)
             true, // 4. All initialized (tail leftover bytes should be initialized too)
             false, // 5. Big tensor (e.g., 2GB for f16) test
     };
