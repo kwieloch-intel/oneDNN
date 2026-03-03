@@ -30,18 +30,23 @@ namespace impl {
 namespace gpu {
 namespace intel {
 
-static compute::kernel_t get_cached_kernel(intel::engine_t *engine) {
+static status_t get_cached_kernel(
+        intel::engine_t *engine, compute::kernel_t &kernel) {
     static std::unordered_map<engine_id_t, compute::kernel_t> cache;
     static std::mutex mutex;
 
     std::lock_guard<std::mutex> lock(mutex);
     auto it = cache.find(engine->engine_id());
-    if (it != cache.end()) return it->second;
+    if (it != cache.end()) {
+        kernel = it->second;
+        return status::success;
+    }
 
     compute::kernel_ctx_t ctx;
     std::vector<compute::kernel_t> kernels;
-    UNUSED_STATUS(engine->create_kernels(&kernels, {"fill_random"}, ctx));
-    return cache.emplace(engine->engine_id(), kernels[0]).first->second;
+    CHECK(engine->create_kernels(&kernels, {"fill_random"}, ctx));
+    kernel = cache.emplace(engine->engine_id(), kernels[0]).first->second;
+    return status::success;
 }
 
 status_t fill_random(impl::stream_t *stream, size_t size,
@@ -50,7 +55,8 @@ status_t fill_random(impl::stream_t *stream, size_t size,
 
     auto *intel_stream = utils::downcast<intel::stream_t *>(stream);
     auto *intel_engine = utils::downcast<intel::engine_t *>(stream->engine());
-    auto kernel = get_cached_kernel(intel_engine);
+    compute::kernel_t kernel;
+    CHECK(get_cached_kernel(intel_engine, kernel));
 
     static constexpr size_t bytes_per_item = 16;
     compute::nd_range_t nd_range({utils::div_up(size, bytes_per_item), 1, 1});
