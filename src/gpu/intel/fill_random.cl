@@ -37,7 +37,7 @@ __attribute__((intel_reqd_sub_group_size(SG_SIZE))) __kernel void fill_random(
     }
 
     const uint lid = get_sub_group_local_id();
-    for (int i = 0; i < 16; i++) {
+    unroll_for(int i = 0; i < 16; i++) {
         ulong off = base + lid + (ulong)i * SG_SIZE;
         if (off < byte_count) buf[off] = rnd[i];
     }
