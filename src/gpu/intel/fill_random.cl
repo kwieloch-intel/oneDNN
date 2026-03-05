@@ -14,7 +14,6 @@
 * limitations under the License.
 *******************************************************************************/
 
-#define DT_UNDEF 1
 #include "gpu/intel/include/philox.h"
 
 // Fills a buffer with pseudo-random data using Philox RNG and subgroup block

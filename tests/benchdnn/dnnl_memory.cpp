@@ -611,36 +611,27 @@ void dnn_mem_t::memset(int value, size_t size, int buffer_index) const {
     SAFE_V(FAIL);
 }
 
-// Fills buffer with pseudo-random data generated directly on the device.
-// This mitigates the impact of GPU driver data compression, which could yield
-// unrealistically high bandwidth measurements in mode=F. Defaults to "memset"
-// when non-Intel GPU runtime or CPU runtime is used.
 #if (DNNL_GPU_RUNTIME != DNNL_RUNTIME_NONE \
         && DNNL_GPU_VENDOR == DNNL_VENDOR_INTEL)
 extern "C" dnnl_status_t dnnl_impl_gpu_fill_random(dnnl_stream_t stream,
         size_t size, dnnl_memory_t memory, int buffer_index, uint32_t seed);
-#endif
 
-void dnn_mem_t::fill_for_perf_bench(size_t size, int buffer_index) const {
-
-#if (DNNL_GPU_RUNTIME != DNNL_RUNTIME_NONE \
-        && DNNL_GPU_VENDOR == DNNL_VENDOR_INTEL)
-    const uint32_t seed = 0;
-    if (!is_cpu(engine_)) {
-        auto mem = m_padded_ ? m_padded_ : m_;
-        stream_t stream(engine_);
-        DNN_SAFE_V(dnnl_impl_gpu_fill_random(
-                stream, size, mem, buffer_index, seed));
-        DNN_SAFE_V(dnnl_stream_wait(stream));
-        return;
+// Fills buffer with pseudo-random data generated directly on the device.
+// This mitigates GPU driver data compression, which could otherwise yield
+// unrealistically high bandwidth measurements in mode=F (e.g., via memset).
+void dnn_mem_t::gpu_fill_random(size_t size, int buffer_index) const {
+    if (is_cpu(engine_)) {
+        BENCHDNN_PRINT(0, "%s\n", "gpu_fill_random called with CPU engine");
+        SAFE_V(FAIL);
     }
-#endif
-
-    BENCHDNN_PRINT(2, "%s\n",
-            "The function 'fill_for_perf_bench' has reverted to memset due to "
-            "the use of a non-Intel GPU runtime or a CPU runtime.");
-    this->memset(dnnl_mem_default_perf_test_value, size, buffer_index);
+    static constexpr uint32_t seed = 123456789;
+    auto mem = m_padded_ ? m_padded_ : m_;
+    stream_t stream(engine_);
+    DNN_SAFE_V(
+            dnnl_impl_gpu_fill_random(stream, size, mem, buffer_index, seed));
+    DNN_SAFE_V(dnnl_stream_wait(stream));
 }
+#endif
 
 dnn_mem_t dnn_mem_t::create_from_host_ptr(
         const dnnl_memory_desc_t &md, dnnl_engine_t engine, void *host_ptr) {
@@ -986,10 +977,19 @@ int dnn_mem_t::initialize(
             if (has_bench_mode_modifier(mode_modifier_t::no_ref_memory)
                     || cold_cache_input.cold_cache_mode_
                             != default_cold_cache_input().cold_cache_mode_) {
-                // Fill memory with pseudo-random data directly on device
-                // to avoid data compression by GPU drivers that would
-                // lead to unrealistic bandwidth numbers in mode=f.
-                this->fill_for_perf_bench(sz, i);
+#if (DNNL_GPU_RUNTIME != DNNL_RUNTIME_NONE \
+        && DNNL_GPU_VENDOR == DNNL_VENDOR_INTEL)
+                if (!is_cpu(engine_))
+                    // Fill memory with pseudo-random data directly on device
+                    // to avoid data compression.
+                    this->gpu_fill_random(sz, i);
+                else
+                    // Fill memory directly with 0x3F3F3F3F (0.747059f).
+                    this->memset(dnnl_mem_default_perf_test_value, sz, i);
+#else
+                // Fill memory directly with 0x3F3F3F3F (0.747059f).
+                this->memset(dnnl_mem_default_perf_test_value, sz, i);
+#endif
             } else {
                 // Fill memory with a magic number (NAN for fp data types)
                 // to catch possible uninitialized access.
