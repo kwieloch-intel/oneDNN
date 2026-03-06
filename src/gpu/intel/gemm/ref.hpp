@@ -109,7 +109,7 @@ struct ref_t : public primitive_t {
             const auto bia_dt = desc()->bias_type();
             const bool wei_decompress = utils::one_of(b_dt, f32, f16, bf16)
                     && utils::one_of(c_dt, f32, f16, bf16)
-                    && utils::one_of(a_dt, u8, s8);
+                    && utils::one_of(a_dt, u8, s8, u4, s4);
 
             const auto ndims = desc()->c_desc.ndims;
             const auto a_strides = desc()->a_desc.format_desc.blocking.strides;

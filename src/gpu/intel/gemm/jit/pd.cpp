@@ -203,7 +203,8 @@ bool pd_t::wei_decomp() {
                            d->b_type(), f16, f32, bf16, f8_e5m2, f8_e4m3))
             && types::data_type_bits(d->a_type())
             < types::data_type_bits(d->b_type())
-            && attr()->mayiconvert(d->a_type(), f32);
+            && (types::is_integral_dt(d->a_type())
+                    || attr()->mayiconvert(d->a_type(), f32));
 }
 
 bool pd_t::quant_enabled() {
