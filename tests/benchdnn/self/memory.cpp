@@ -13,12 +13,207 @@
 * See the License for the specific language governing permissions and
 * limitations under the License.
 *******************************************************************************/
+#include <cmath>
+#include <set>
 
 #include "dnnl_memory.hpp"
 
 #include "self/self.hpp"
 
 namespace self {
+
+// Verifies that gpu_fill_random() produces non-uniform, finite,
+// nan-free, inf-free, and seed-varying valid data for mode=F.
+static int check_gpu_fill_random() {
+    if (!(DNNL_GPU_RUNTIME != DNNL_RUNTIME_NONE
+                && DNNL_GPU_VENDOR == DNNL_VENDOR_INTEL)
+            || is_cpu(get_test_engine())) {
+        BENCHDNN_PRINT(2, "%s\n",
+                "Skipping gpu_fill_random checks due to the use of a "
+                "non-Intel GPU runtime or a CPU runtime.");
+        return OK;
+    }
+
+    // Note:
+    // This test suite will be deleted once debugging and verification of
+    // new gpu_fill_random() is complete. Can be used to test the new
+    // gpu_fill_random() as well as old memset-based approach.
+
+    bool tests_array[] = {
+            true, // 0. Print all values for debugging purposes
+            true, // 1. Non-uniformity check
+            true, // 2. No NaN/Inf
+            false, // 3. Different calls should produce different data (seed test)
+            true, // 4. All initialized (tail leftover bytes should be initialized too)
+            false, // 5. Big tensor (e.g., 2GB for f16) test
+    };
+
+    // 0. Print all values for debugging purposes
+    if (tests_array[0]) {
+        const int nelems = 513;
+        dnnl_dim_t dims {nelems};
+        auto md = dnn_mem_t::init_md(1, &dims, dnnl_f16, tag::abx);
+
+        dnn_mem_t m(md, get_test_engine(), /* prefill = */ false);
+        m.unmap();
+        SAFE(m.gpu_fill_random(nelems * sizeof(uint16_t), 0), WARN);
+        m.map();
+
+        const auto *ptr = static_cast<const uint16_t *>(m);
+
+        for (int i = nelems - 1; i >= 0; i--) {
+            if (ptr[i] != 0) {
+                printf("[%i]: \033[32m%04X (%i)\033[0m\n", i, ptr[i], ptr[i]);
+            } else {
+                printf("[%i]: \033[31m%04X (%i)\033[0m\n", i, ptr[i], ptr[i]);
+            }
+        }
+    }
+
+    // 1. Non-uniformity check: require at least 50% unique values
+    if (tests_array[1]) {
+        const int nelems = 1024; // 1024*1024 for some repeated values
+        dnnl_dim_t dims {nelems};
+        auto md = dnn_mem_t::init_md(1, &dims, dnnl_f32, tag::abx);
+
+        dnn_mem_t m(md, get_test_engine(), /* prefill = */ false);
+        m.unmap();
+        SAFE(m.gpu_fill_random(nelems * sizeof(float), 0), WARN);
+        m.map();
+
+        std::set<uint32_t> unique_vals_uint32_t;
+        const auto *ptr_uint32_t = static_cast<const uint32_t *>(m);
+
+        bool all_same = true;
+        uint32_t first_val = ptr_uint32_t[0];
+        for (int i = 0; i < nelems; i++) {
+            // printf("%08X\n", ptr_uint32_t[i]);
+            unique_vals_uint32_t.insert(ptr_uint32_t[i]);
+            if (ptr_uint32_t[i] != first_val) all_same = false;
+        }
+
+        // printf("Unique uint32_t values: %d/%d\n", (int)unique_vals_uint32_t.size(), nelems);
+
+        SELF_CHECK(!all_same,
+                "gpu_fill_random failed because all 32-bit samples are "
+                "identical (val=0x%08X)",
+                first_val);
+        SELF_CHECK(
+                unique_vals_uint32_t.size() > static_cast<size_t>(nelems / 2),
+                "gpu_fill_random failed because it produced too few unique "
+                "32-bit values: %d",
+                (int)unique_vals_uint32_t.size());
+    }
+
+    // 2. No NaN/Inf for any available FP type (mask 0xEEEEEEEE)
+    if (tests_array[2]) {
+        const int nelems = 1024;
+        dnnl_dim_t dims {nelems};
+        auto md = dnn_mem_t::init_md(1, &dims, dnnl_f32, tag::abx);
+
+        dnn_mem_t m(md, get_test_engine(), /* prefill = */ false);
+        m.unmap();
+        SAFE(m.gpu_fill_random(nelems * sizeof(float), 0), WARN);
+        m.map();
+
+        const auto *ptr_u32 = static_cast<const uint32_t *>(m);
+        const auto *ptr_f32 = static_cast<const float *>(m);
+
+        for (int i = 0; i < nelems; i++) {
+            SELF_CHECK((ptr_u32[i] & 0x11111111u) == 0,
+                    "gpu_fill_random byte-mask invariant violated at index "
+                    "%d: 0x%08X & 0x11111111 = 0x%08X",
+                    i, ptr_u32[i], ptr_u32[i] & 0x11111111u);
+            SELF_CHECK(std::isfinite(ptr_f32[i]),
+                    "gpu_fill_random produced non-finite f32 at index %d", i);
+        }
+    }
+
+    // 3. Different calls should produce different data (seed test)
+    if (tests_array[3]) {
+        const int nelems = 512;
+        dnnl_dim_t dims {nelems};
+        auto md = dnn_mem_t::init_md(1, &dims, dnnl_f32, tag::abx);
+
+        dnn_mem_t m1(md, get_test_engine(), /* prefill = */ false);
+        dnn_mem_t m2(md, get_test_engine(), /* prefill = */ false);
+        m1.unmap();
+        m2.unmap();
+        SAFE(m1.gpu_fill_random(nelems * sizeof(float), 0), WARN);
+        SAFE(m2.gpu_fill_random(nelems * sizeof(float), 0), WARN);
+        m1.map();
+        m2.map();
+        const auto *p1 = static_cast<const uint32_t *>(m1);
+        const auto *p2 = static_cast<const uint32_t *>(m2);
+        int num_different = 0;
+        for (int i = 0; i < nelems; i++)
+            if (p1[i] != p2[i]) num_different++;
+
+        // printf("Number of different uint32_t values between two calls: "
+        //        "%d/%d\n",
+        //        num_different, nelems);
+
+        // Require at least 50% of values to differ between two calls
+        // if nelems set to default value of 1024.
+        SELF_CHECK(num_different > nelems / 2,
+                "Two gpu_fill_random calls produced too similar data: "
+                "only %d/%d values differ",
+                num_different, nelems);
+    }
+
+    // 4. All initialized (tail leftover bytes should be initialized too)
+    if (tests_array[4]) {
+        for (int nelems = 16; nelems <= 256; nelems++) {
+            dnnl_dim_t dims {nelems};
+            auto md = dnn_mem_t::init_md(1, &dims, dnnl_f16, tag::abx);
+
+            dnn_mem_t m(md, get_test_engine(), /* prefill = */ false);
+            const std::size_t total_bytes = nelems * sizeof(std::uint16_t);
+            m.unmap();
+            m.memset(0xFF, total_bytes, 0);
+            SAFE(m.gpu_fill_random(total_bytes, 0), WARN);
+            m.map();
+
+            const auto *raw16 = static_cast<const uint16_t *>(m);
+            int nan_count = 0;
+            for (std::size_t i = 0; i < static_cast<std::size_t>(nelems); ++i)
+                if (raw16[i] == 0xFFFFu) nan_count++;
+
+            // All values should be initialized and nan/inf free
+            SELF_CHECK(nan_count == 0,
+                    "gpu_fill_random left %d uninitialized values (0xFFFF)",
+                    nan_count);
+        }
+    }
+
+    // 5. Big tensor test: 4GB+1 bytes (u8) to catch uint32 overflow.
+    if (tests_array[5]) {
+        const size_t nelems = (1ULL << 32) + 1; // 4GB + 1 byte
+        dnnl_dim_t dims {static_cast<dnnl_dim_t>(nelems)};
+        auto md = dnn_mem_t::init_md(1, &dims, dnnl_u8, tag::abx);
+
+        dnn_mem_t m(md, get_test_engine(), /* prefill = */ false);
+        const std::size_t total_bytes = nelems * sizeof(std::uint8_t);
+        m.unmap();
+        m.memset(0xFF, total_bytes, 0);
+        SAFE(m.gpu_fill_random(total_bytes, 0), WARN);
+        m.map();
+
+        // Check last 1024 samples
+        const auto *raw8 = static_cast<const uint8_t *>(m);
+        int uninit_count = 0;
+        for (std::size_t i = nelems - 1024; i < nelems; ++i)
+            if (raw8[i] == 0xFFu) uninit_count++;
+
+        // All values should be initialized
+        SELF_CHECK(uninit_count == 0,
+                "gpu_fill_random left %d uninitialized values (0xFF) in "
+                "the end of big tensor",
+                uninit_count);
+    }
+
+    return OK;
+}
 
 static int check_bool_operator() {
     dnnl_dim_t dims {1};
@@ -63,6 +258,7 @@ static int check_bool_operator() {
 
 void memory() {
     RUN(check_bool_operator());
+    RUN(check_gpu_fill_random());
 }
 
 } // namespace self
