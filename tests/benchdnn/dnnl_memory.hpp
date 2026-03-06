@@ -179,7 +179,7 @@ struct dnn_mem_t {
     void memset(int value, size_t size, int buffer_index) const;
 #if (DNNL_GPU_RUNTIME != DNNL_RUNTIME_NONE \
         && DNNL_GPU_VENDOR == DNNL_VENDOR_INTEL)
-    void gpu_fill_random(size_t size, int buffer_index) const;
+    int gpu_fill_random(size_t size, int buffer_index) const;
 #endif
 
     static dnn_mem_t create_from_host_ptr(

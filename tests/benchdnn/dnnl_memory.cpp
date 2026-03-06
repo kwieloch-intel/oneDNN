@@ -619,17 +619,18 @@ extern "C" dnnl_status_t dnnl_impl_gpu_fill_random(dnnl_stream_t stream,
 // Fills buffer with pseudo-random data generated directly on the device.
 // This mitigates GPU driver data compression, which could otherwise yield
 // unrealistically high bandwidth measurements in mode=F (e.g., via memset).
-void dnn_mem_t::gpu_fill_random(size_t size, int buffer_index) const {
+int dnn_mem_t::gpu_fill_random(size_t size, int buffer_index) const {
     if (is_cpu(engine_)) {
         BENCHDNN_PRINT(0, "%s\n", "gpu_fill_random called with CPU engine");
-        SAFE_V(FAIL);
+        return FAIL;
     }
     static constexpr uint32_t seed = 123456789;
     auto mem = m_padded_ ? m_padded_ : m_;
     stream_t stream(engine_);
-    DNN_SAFE_V(
-            dnnl_impl_gpu_fill_random(stream, size, mem, buffer_index, seed));
-    DNN_SAFE_V(dnnl_stream_wait(stream));
+    DNN_SAFE(dnnl_impl_gpu_fill_random(stream, size, mem, buffer_index, seed),
+            WARN);
+    DNN_SAFE(dnnl_stream_wait(stream), WARN);
+    return OK;
 }
 #endif
 
@@ -982,7 +983,7 @@ int dnn_mem_t::initialize(
                 if (!is_cpu(engine_))
                     // Fill memory with pseudo-random data directly on device
                     // to avoid data compression.
-                    this->gpu_fill_random(sz, i);
+                    SAFE(this->gpu_fill_random(sz, i), WARN);
                 else
                     // Fill memory directly with 0x3F3F3F3F (0.747059f).
                     this->memset(dnnl_mem_default_perf_test_value, sz, i);
