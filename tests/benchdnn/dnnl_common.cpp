@@ -1801,6 +1801,39 @@ engine_t::engine_t(dnnl_engine_kind_t engine_kind) : is_owner_(true) {
     dnnl_status_t status = dnnl_engine_create(&engine_, engine_kind, idx);
     if (engine_kind == dnnl_cpu && status != dnnl_success)
         maybe_print_cpu_engine_error_message();
+
+//     // Correctness + performance combined (--mode=CP) is explicitly
+//     // prohibited: it is unused, currently broken on both CPU and GPU, and
+//     // correctness requires specific low-range data filling that produces
+//     // unreliable performance numbers (data is compressible by the GPU
+//     // driver).
+//     if (has_bench_mode_bit(mode_bit_t::corr)
+//             && has_bench_mode_bit(mode_bit_t::perf)) {
+//         BENCHDNN_PRINT(0, "%s\n",
+//                 "Error: --mode=CP is not supported. Use --mode=C and "
+//                 "--mode=P (or --mode=F) separately.");
+//         status = dnnl_invalid_arguments;
+//     }
+
+//     // For Intel GPUs in perf-only mode (--mode=P), automatically enable
+//     // the no_ref_memory modifier.  This skips CPU reference memory
+//     // allocation and fill_random_real_dense() calls, so the GPU buffers
+//     // retain the incompressible Philox PRNG data written by
+//     // gpu_fill_random() during dnn_mem_t::initialize().  This aligns
+//     // --mode=P data filling with --mode=F on Intel GPUs.
+//     //
+//     // For CPU, --mode=F uses 0x3F memset (different from --mode=P which
+//     // uses fill_random_real_dense), so the distinction is intentional and
+//     // no change is made for CPU.
+// #if (DNNL_GPU_RUNTIME != DNNL_RUNTIME_NONE \
+//         && DNNL_GPU_VENDOR == DNNL_VENDOR_INTEL)
+//     if (engine_kind == dnnl_gpu
+//             && has_bench_mode_bit(mode_bit_t::perf)
+//             && !has_bench_mode_bit(mode_bit_t::corr)) {
+//         bench_mode_modifier |= mode_modifier_t::no_ref_memory;
+//     }
+// #endif
+
     if (has_bench_mode_modifier(mode_modifier_t::no_ref_memory)) {
         if (has_bench_mode_bit(mode_bit_t::corr)) {
             BENCHDNN_PRINT(0, "%s\n",
