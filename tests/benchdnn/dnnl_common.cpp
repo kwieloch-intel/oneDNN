@@ -800,6 +800,30 @@ int measure_perf(const thr_ctx_t &ctx, res_t *res, perf_function_t &perf_func,
         v_args[j] = args_t(mem_map[j]);
         execute_unmap_args(v_args[j], dnnl_args[j]);
     }
+
+//     // When correctness validation has already been performed (mode=CP or
+//     // mode=P), the GPU buffers may contain deterministic data written by
+//     // fill_random_real_dense() → reorder().  That data can be compressed
+//     // by the GPU driver, leading to artificially high bandwidth numbers.
+//     //
+//     // Re-fill every GPU buffer with incompressible Philox PRNG data so
+//     // that the subsequent perf measurement reflects real-world conditions.
+//     // This is safe because correctness checks (if any) are already done
+//     // at this point — measure_perf() is always called last in doit().
+// #if (DNNL_GPU_RUNTIME != DNNL_RUNTIME_NONE \
+//         && DNNL_GPU_VENDOR == DNNL_VENDOR_INTEL)
+//     if (!is_cpu(engine)) {
+//         for (int i = 0; i < args.size(); i++) {
+//             const auto &m = args.dnn_mem(i);
+//             const int nhandles = query_md_num_handles(m.md_);
+//             for (int h = 0; h < nhandles; h++) {
+//                 size_t sz = dnnl_memory_desc_get_size_v2(m.md_, h);
+//                 if (sz > 0) m.gpu_fill_random(sz, h);
+//             }
+//         }
+//     }
+// #endif
+
     execute_unmap_args(args, dnnl_args[0]);
 
     auto &t = res->timer_map.perf_timer();
