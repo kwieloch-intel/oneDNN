@@ -317,6 +317,28 @@ int fill_random_real_dense(dnn_mem_t &mem, dnn_mem_t &mem_ref, res_t *res,
     }
 
     if (mem) {
+        // // When running in perf-only mode (--mode=P without correctness) on a
+        // // GPU with Intel vendor, the GPU buffer was already filled with
+        // // incompressible pseudo-random data by gpu_fill_random() (Philox PRNG)
+        // // during dnn_mem_t::initialize().  Reordering the CPU-generated
+        // // deterministic reference data onto the GPU would overwrite that
+        // // Philox data with a pattern the GPU driver can compress, leading to
+        // // artificially high bandwidth numbers in benchmarks.
+        // //
+        // // Skip the reorder so the Philox data survives for the perf
+        // // measurement.  The CPU-side mem_ref still holds valid reference
+        // // values; it simply won't be copied to the device buffer.
+        // //
+        // // Note: when correctness mode is active (--mode=C or --mode=CP),
+        // // the reorder must happen so that the GPU executes on the same data
+        // // that will be compared against the reference.
+        // const bool perf_only = has_bench_mode_bit(mode_bit_t::perf)
+        //         && !has_bench_mode_bit(mode_bit_t::corr);
+        // const bool gpu_intel = !is_cpu(mem.engine())
+        //         && (DNNL_GPU_RUNTIME != DNNL_RUNTIME_NONE)
+        //         && (DNNL_GPU_VENDOR == DNNL_VENDOR_INTEL);
+        // if (perf_only && gpu_intel) return OK;
+
         // TODO: move `res` inside reorder.
         auto status = mem.reorder(mem_ref);
         if (status != OK) {
