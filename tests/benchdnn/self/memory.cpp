@@ -40,7 +40,7 @@ static int check_gpu_fill_random() {
     // gpu_fill_random() as well as old memset-based approach.
 
     bool tests_array[] = {
-            true, // 0. Print all values for debugging purposes
+            false, // 0. Print all values for debugging purposes
             true, // 1. Non-uniformity check
             true, // 2. No NaN/Inf
             false, // 3. Different calls should produce different data (seed test)
@@ -72,60 +72,197 @@ static int check_gpu_fill_random() {
 
     // 1. Non-uniformity check: require at least 50% unique values
     if (tests_array[1]) {
-        const int nelems = 1024; // 1024*1024 for some repeated values
-        dnnl_dim_t dims {nelems};
-        auto md = dnn_mem_t::init_md(1, &dims, dnnl_f32, tag::abx);
+        // 1a. f16: 1M elements, 16-bit uniqueness
+        {
+            const int nelems = 1024 * 1024;
+            dnnl_dim_t dims {nelems};
+            auto md = dnn_mem_t::init_md(1, &dims, dnnl_f16, tag::abx);
 
-        dnn_mem_t m(md, get_test_engine(), /* prefill = */ false);
-        m.unmap();
-        SAFE(m.gpu_fill_random(nelems * sizeof(float), 0), WARN);
-        m.map();
+            dnn_mem_t m(md, get_test_engine(), /* prefill = */ false);
+            m.unmap();
+            SAFE(m.gpu_fill_random(nelems * sizeof(uint16_t), 0), WARN);
+            m.map();
 
-        std::set<uint32_t> unique_vals_uint32_t;
-        const auto *ptr_uint32_t = static_cast<const uint32_t *>(m);
+            std::set<uint16_t> unique_vals;
+            const auto *ptr = static_cast<const uint16_t *>(m);
+            for (int i = 0; i < nelems; i++)
+                unique_vals.insert(ptr[i]);
 
-        bool all_same = true;
-        uint32_t first_val = ptr_uint32_t[0];
-        for (int i = 0; i < nelems; i++) {
-            // printf("%08X\n", ptr_uint32_t[i]);
-            unique_vals_uint32_t.insert(ptr_uint32_t[i]);
-            if (ptr_uint32_t[i] != first_val) all_same = false;
+            printf("f16 unique values: %d/%d\n",
+                    (int)unique_vals.size(), nelems);
+            // SELF_CHECK(unique_vals.size() > static_cast<size_t>(nelems / 2),
+            //         "gpu_fill_random produced too few unique f16 values: %d",
+            //         (int)unique_vals.size());
         }
+        // 1b. f32: 1M elements, 32-bit uniqueness
+        {
+            const int nelems = 1024 * 1024;
+            dnnl_dim_t dims {nelems};
+            auto md = dnn_mem_t::init_md(1, &dims, dnnl_f32, tag::abx);
 
-        // printf("Unique uint32_t values: %d/%d\n", (int)unique_vals_uint32_t.size(), nelems);
+            dnn_mem_t m(md, get_test_engine(), /* prefill = */ false);
+            m.unmap();
+            SAFE(m.gpu_fill_random(nelems * sizeof(uint32_t), 0), WARN);
+            m.map();
 
-        SELF_CHECK(!all_same,
-                "gpu_fill_random failed because all 32-bit samples are "
-                "identical (val=0x%08X)",
-                first_val);
-        SELF_CHECK(
-                unique_vals_uint32_t.size() > static_cast<size_t>(nelems / 2),
-                "gpu_fill_random failed because it produced too few unique "
-                "32-bit values: %d",
-                (int)unique_vals_uint32_t.size());
+            std::set<uint32_t> unique_vals;
+            const auto *ptr = static_cast<const uint32_t *>(m);
+            for (int i = 0; i < nelems; i++)
+                unique_vals.insert(ptr[i]);
+
+            printf("f32 unique values: %d/%d\n",
+                    (int)unique_vals.size(), nelems);
+            SELF_CHECK(unique_vals.size() > static_cast<size_t>(nelems / 2),
+                    "gpu_fill_random produced too few unique f32 values: %d",
+                    (int)unique_vals.size());
+        }
+        // 1c. f8_e5m2: 1M elements, 8-bit uniqueness (max 256)
+        {
+            const int nelems = 1024 * 1024;
+            dnnl_dim_t dims {nelems};
+            auto md = dnn_mem_t::init_md(1, &dims, dnnl_f8_e5m2, tag::abx);
+
+            dnn_mem_t m(md, get_test_engine(), /* prefill = */ false);
+            m.unmap();
+            SAFE(m.gpu_fill_random(nelems * sizeof(uint8_t), 0), WARN);
+            m.map();
+
+            std::set<uint8_t> unique_vals;
+            const auto *ptr = static_cast<const uint8_t *>(m);
+            for (int i = 0; i < nelems; i++)
+                unique_vals.insert(ptr[i]);
+
+            // Mask 0xFB clears bit 2 → max 128 unique values.
+            printf("f8_e5m2 unique values: %d/128\n",
+                    (int)unique_vals.size());
+            // SELF_CHECK(unique_vals.size() > 100,
+            //         "gpu_fill_random produced too few unique f8_e5m2 "
+            //         "values: %d",
+            //         (int)unique_vals.size());
+        }
+        // 1d. f8_e4m3: 1M elements, 8-bit uniqueness (max 256)
+        {
+            const int nelems = 1024 * 1024;
+            dnnl_dim_t dims {nelems};
+            auto md = dnn_mem_t::init_md(1, &dims, dnnl_f8_e4m3, tag::abx);
+
+            dnn_mem_t m(md, get_test_engine(), /* prefill = */ false);
+            m.unmap();
+            SAFE(m.gpu_fill_random(nelems * sizeof(uint8_t), 0), WARN);
+            m.map();
+
+            std::set<uint8_t> unique_vals;
+            const auto *ptr = static_cast<const uint8_t *>(m);
+            for (int i = 0; i < nelems; i++)
+                unique_vals.insert(ptr[i]);
+
+            // Mask 0xF7 clears bit 3 → max 128 unique values.
+            printf("f8_e4m3 unique values: %d/128\n",
+                    (int)unique_vals.size());
+            // SELF_CHECK(unique_vals.size() > 100,
+            //         "gpu_fill_random produced too few unique f8_e4m3 "
+            //         "values: %d",
+            //         (int)unique_vals.size());
+        }
     }
 
-    // 2. No NaN/Inf for any available FP type (mask 0xEEEEEEEE)
+    // 2. No NaN/Inf check per FP type (mask clears exponent LSB)
     if (tests_array[2]) {
         const int nelems = 1024;
-        dnnl_dim_t dims {nelems};
-        auto md = dnn_mem_t::init_md(1, &dims, dnnl_f32, tag::abx);
+        // 2a. f32: mask 0xFF7FFFFF clears bit 23
+        {
+            dnnl_dim_t dims {nelems};
+            auto md = dnn_mem_t::init_md(1, &dims, dnnl_f32, tag::abx);
 
-        dnn_mem_t m(md, get_test_engine(), /* prefill = */ false);
-        m.unmap();
-        SAFE(m.gpu_fill_random(nelems * sizeof(float), 0), WARN);
-        m.map();
+            dnn_mem_t m(md, get_test_engine(), /* prefill = */ false);
+            m.unmap();
+            SAFE(m.gpu_fill_random(nelems * sizeof(float), 0), WARN);
+            m.map();
 
-        const auto *ptr_u32 = static_cast<const uint32_t *>(m);
-        const auto *ptr_f32 = static_cast<const float *>(m);
+            const auto *ptr_u32 = static_cast<const uint32_t *>(m);
+            const auto *ptr_f32 = static_cast<const float *>(m);
 
-        for (int i = 0; i < nelems; i++) {
-            SELF_CHECK((ptr_u32[i] & 0x11111111u) == 0,
-                    "gpu_fill_random byte-mask invariant violated at index "
-                    "%d: 0x%08X & 0x11111111 = 0x%08X",
-                    i, ptr_u32[i], ptr_u32[i] & 0x11111111u);
-            SELF_CHECK(std::isfinite(ptr_f32[i]),
-                    "gpu_fill_random produced non-finite f32 at index %d", i);
+            for (int i = 0; i < nelems; i++) {
+                SELF_CHECK((ptr_u32[i] & 0x00800000u) == 0,
+                        "f32 mask invariant violated at index "
+                        "%d: 0x%08X & 0x00800000 = 0x%08X",
+                        i, ptr_u32[i], ptr_u32[i] & 0x00800000u);
+                SELF_CHECK(std::isfinite(ptr_f32[i]),
+                        "gpu_fill_random produced non-finite f32 at index %d",
+                        i);
+            }
+        }
+        // 2b. f16: mask 0xFBFF clears bit 10 per f16 element
+        //     exponent = bits[14:10], all-ones exp = NaN/Inf
+        {
+            dnnl_dim_t dims {nelems};
+            auto md = dnn_mem_t::init_md(1, &dims, dnnl_f16, tag::abx);
+
+            dnn_mem_t m(md, get_test_engine(), /* prefill = */ false);
+            m.unmap();
+            SAFE(m.gpu_fill_random(nelems * sizeof(uint16_t), 0), WARN);
+            m.map();
+
+            const auto *ptr = static_cast<const uint16_t *>(m);
+            for (int i = 0; i < nelems; i++) {
+                SELF_CHECK((ptr[i] & 0x0400u) == 0,
+                        "f16 mask invariant violated at index "
+                        "%d: 0x%04X & 0x0400 = 0x%04X",
+                        i, ptr[i], ptr[i] & 0x0400u);
+                uint16_t exp = (ptr[i] >> 10) & 0x1F;
+                SELF_CHECK(exp != 0x1F,
+                        "gpu_fill_random produced NaN/Inf f16 at index "
+                        "%d: 0x%04X",
+                        i, ptr[i]);
+            }
+        }
+        // 2c. bf16: mask 0xFF7F clears bit 7 per bf16 element
+        //     exponent = bits[14:7], all-ones exp = NaN/Inf
+        {
+            dnnl_dim_t dims {nelems};
+            auto md = dnn_mem_t::init_md(1, &dims, dnnl_bf16, tag::abx);
+
+            dnn_mem_t m(md, get_test_engine(), /* prefill = */ false);
+            m.unmap();
+            SAFE(m.gpu_fill_random(nelems * sizeof(uint16_t), 0), WARN);
+            m.map();
+
+            const auto *ptr = static_cast<const uint16_t *>(m);
+            for (int i = 0; i < nelems; i++) {
+                SELF_CHECK((ptr[i] & 0x0080u) == 0,
+                        "bf16 mask invariant violated at index "
+                        "%d: 0x%04X & 0x0080 = 0x%04X",
+                        i, ptr[i], ptr[i] & 0x0080u);
+                uint16_t exp = (ptr[i] >> 7) & 0xFF;
+                SELF_CHECK(exp != 0xFF,
+                        "gpu_fill_random produced NaN/Inf bf16 at index "
+                        "%d: 0x%04X",
+                        i, ptr[i]);
+            }
+        }
+        // 2d. f8_e5m2: mask 0xFB clears bit 2 per byte
+        //     exponent = bits[6:2], all-ones exp = NaN/Inf
+        {
+            dnnl_dim_t dims {nelems};
+            auto md = dnn_mem_t::init_md(1, &dims, dnnl_f8_e5m2, tag::abx);
+
+            dnn_mem_t m(md, get_test_engine(), /* prefill = */ false);
+            m.unmap();
+            SAFE(m.gpu_fill_random(nelems * sizeof(uint8_t), 0), WARN);
+            m.map();
+
+            const auto *ptr = static_cast<const uint8_t *>(m);
+            for (int i = 0; i < nelems; i++) {
+                SELF_CHECK((ptr[i] & 0x04u) == 0,
+                        "f8_e5m2 mask invariant violated at index "
+                        "%d: 0x%02X & 0x04 = 0x%02X",
+                        i, ptr[i], ptr[i] & 0x04u);
+                uint8_t exp = (ptr[i] >> 2) & 0x1F;
+                SELF_CHECK(exp != 0x1F,
+                        "gpu_fill_random produced NaN/Inf f8_e5m2 at index "
+                        "%d: 0x%02X",
+                        i, ptr[i]);
+            }
         }
     }
 
@@ -163,6 +300,7 @@ static int check_gpu_fill_random() {
 
     // 4. All initialized (tail leftover bytes should be initialized too)
     if (tests_array[4]) {
+        // 4a. f16: 2 bytes per element
         for (int nelems = 16; nelems <= 256; nelems++) {
             dnnl_dim_t dims {nelems};
             auto md = dnn_mem_t::init_md(1, &dims, dnnl_f16, tag::abx);
@@ -179,10 +317,33 @@ static int check_gpu_fill_random() {
             for (std::size_t i = 0; i < static_cast<std::size_t>(nelems); ++i)
                 if (raw16[i] == 0xFFFFu) nan_count++;
 
-            // All values should be initialized and nan/inf free
             SELF_CHECK(nan_count == 0,
-                    "gpu_fill_random left %d uninitialized values (0xFFFF)",
-                    nan_count);
+                    "f16: gpu_fill_random left %d uninitialized values "
+                    "(0xFFFF) for nelems=%d",
+                    nan_count, nelems);
+        }
+        // 4b. f8_e5m2: 1 byte per element — most sensitive to tail issues
+        for (int nelems = 16; nelems <= 256; nelems++) {
+            dnnl_dim_t dims {nelems};
+            auto md = dnn_mem_t::init_md(
+                    1, &dims, dnnl_f8_e5m2, tag::abx);
+
+            dnn_mem_t m(md, get_test_engine(), /* prefill = */ false);
+            const std::size_t total_bytes = nelems * sizeof(std::uint8_t);
+            m.unmap();
+            m.memset(0xFF, total_bytes, 0);
+            SAFE(m.gpu_fill_random(total_bytes, 0), WARN);
+            m.map();
+
+            const auto *raw8 = static_cast<const uint8_t *>(m);
+            int uninit_count = 0;
+            for (std::size_t i = 0; i < static_cast<std::size_t>(nelems); ++i)
+                if (raw8[i] == 0xFFu) uninit_count++;
+
+            SELF_CHECK(uninit_count == 0,
+                    "f8_e5m2: gpu_fill_random left %d uninitialized values "
+                    "(0xFF) for nelems=%d",
+                    uninit_count, nelems);
         }
     }
 
