@@ -1,0 +1,21 @@
+--reset
+# No mask
+--dt=f32,f16,bf16
+--batch=shapes_basic
+# Buffer mask (bf16 excluded: GPU kernel bug)
+--mask_type=buffer
+--dt=f32,f16
+--batch=shapes_basic
+# Causal mask
+--mask_type=causal_top_left
+--dt=f32,f16
+--batch=shapes_basic
+# Scale (reset mask)
+--mask_type=none
+--scale_type=mul
+--dt=f32,f16
+--batch=shapes_basic
+# Transformer shapes (GPU-safe, no seq_q=1)
+--reset
+--dt=f16,bf16
+--batch=shapes_transformer_gpu
