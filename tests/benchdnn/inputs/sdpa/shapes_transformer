@@ -1,0 +1,21 @@
+# Real-world transformer SDPA shapes for manual testing.
+# Format: Q_dims:K_dims:V_dims
+
+# BERT-base (12 heads, head_size=64, seq=128)
+1x12x128x64:1x12x64x128:1x12x128x64
+
+# BERT-large (16 heads, head_size=64, seq=128)
+1x16x128x64:1x16x64x128:1x16x128x64
+
+# GPT-2 (12 heads, head_size=64, seq=256)
+1x12x256x64:1x12x64x256:1x12x256x64
+
+# LLaMA (32 heads, head_size=128, seq=64)
+1x32x64x128:1x32x128x64:1x32x64x128
+
+# Batch > 1
+2x8x64x64:2x8x64x64:2x8x64x64
+
+# KV-cache decode (seq_q=1).
+1x8x1x64:1x8x64x256:1x8x256x64
+1x8x1x64:1x8x64x512:1x8x512x64
