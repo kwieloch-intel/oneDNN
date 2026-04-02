@@ -94,7 +94,9 @@ const char *prop2str(dnnl_prop_kind_t prop) {
 static const std::map<int, std::vector<const char *>> supported_args {
         {DNNL_ARG_SRC, {"src", "src0"}},
         {DNNL_ARG_SRC_1, {"src1"}},
-        {DNNL_ARG_WEIGHTS, {"wei"}},
+        {DNNL_ARG_WEIGHTS, {"wei", "wei_gate"}},
+        {DNNL_ARG_WEIGHTS_1, {"wei_up"}},
+        {DNNL_ARG_WEIGHTS_2, {"wei_down"}},
         {DNNL_ARG_DST, {"dst"}},
         {DNNL_ARG_ATTR_POST_OP_DW | DNNL_ARG_DST, {"attr_post_op_dw_dst"}},
         {DNNL_ARG_ATTR_POST_OP_DW | DNNL_ARG_WEIGHTS, {"attr_post_op_dw_wei"}},
