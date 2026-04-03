@@ -1797,8 +1797,7 @@ engine_t::engine_t(dnnl_engine_kind_t engine_kind) : is_owner_(true) {
     // fill_random_dense() and align data filling with --mode=F.
 #if (DNNL_GPU_RUNTIME != DNNL_RUNTIME_NONE \
         && DNNL_GPU_VENDOR == DNNL_VENDOR_INTEL)
-    if (engine_kind == dnnl_gpu
-            && has_bench_mode_bit(mode_bit_t::perf)
+    if (engine_kind == dnnl_gpu && has_bench_mode_bit(mode_bit_t::perf)
             && !has_bench_mode_bit(mode_bit_t::corr)) {
         bench_mode_modifier |= mode_modifier_t::no_ref_memory;
     }
