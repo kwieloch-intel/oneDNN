@@ -805,29 +805,6 @@ int measure_perf(const thr_ctx_t &ctx, res_t *res, perf_function_t &perf_func,
         execute_unmap_args(v_args[j], dnnl_args[j]);
     }
 
-//     // When correctness validation has already been performed (mode=CP or
-//     // mode=P), the GPU buffers may contain deterministic data written by
-//     // fill_random_real_dense() → reorder().  That data can be compressed
-//     // by the GPU driver, leading to artificially high bandwidth numbers.
-//     //
-//     // Re-fill every GPU buffer with incompressible Philox PRNG data so
-//     // that the subsequent perf measurement reflects real-world conditions.
-//     // This is safe because correctness checks (if any) are already done
-//     // at this point — measure_perf() is always called last in doit().
-// #if (DNNL_GPU_RUNTIME != DNNL_RUNTIME_NONE \
-//         && DNNL_GPU_VENDOR == DNNL_VENDOR_INTEL)
-//     if (!is_cpu(engine)) {
-//         for (int i = 0; i < args.size(); i++) {
-//             const auto &m = args.dnn_mem(i);
-//             const int nhandles = query_md_num_handles(m.md_);
-//             for (int h = 0; h < nhandles; h++) {
-//                 size_t sz = dnnl_memory_desc_get_size_v2(m.md_, h);
-//                 if (sz > 0) m.gpu_fill_random(sz, h);
-//             }
-//         }
-//     }
-// #endif
-
     execute_unmap_args(args, dnnl_args[0]);
 
     auto &t = res->timer_map.perf_timer();
@@ -1806,37 +1783,26 @@ engine_t::engine_t(dnnl_engine_kind_t engine_kind) : is_owner_(true) {
     if (engine_kind == dnnl_cpu && status != dnnl_success)
         maybe_print_cpu_engine_error_message();
 
-//     // Correctness + performance combined (--mode=CP) is explicitly
-//     // prohibited: it is unused, currently broken on both CPU and GPU, and
-//     // correctness requires specific low-range data filling that produces
-//     // unreliable performance numbers (data is compressible by the GPU
-//     // driver).
-//     if (has_bench_mode_bit(mode_bit_t::corr)
-//             && has_bench_mode_bit(mode_bit_t::perf)) {
-//         BENCHDNN_PRINT(0, "%s\n",
-//                 "Error: --mode=CP is not supported. Use --mode=C and "
-//                 "--mode=P (or --mode=F) separately.");
-//         status = dnnl_invalid_arguments;
-//     }
+    // Prohibit --mode=CP: it is unused, broken, and correctness data
+    // filling produces unreliable performance numbers on GPUs.
+    if (has_bench_mode_bit(mode_bit_t::corr)
+            && has_bench_mode_bit(mode_bit_t::perf)) {
+        BENCHDNN_PRINT(0, "%s\n",
+                "Error: --mode=CP is not supported. Use --mode=C and "
+                "--mode=P (or --mode=F) separately.");
+        status = dnnl_invalid_arguments;
+    }
 
-//     // For Intel GPUs in perf-only mode (--mode=P), automatically enable
-//     // the no_ref_memory modifier.  This skips CPU reference memory
-//     // allocation and fill_random_real_dense() calls, so the GPU buffers
-//     // retain the incompressible Philox PRNG data written by
-//     // gpu_fill_random() during dnn_mem_t::initialize().  This aligns
-//     // --mode=P data filling with --mode=F on Intel GPUs.
-//     //
-//     // For CPU, --mode=F uses 0x3F memset (different from --mode=P which
-//     // uses fill_random_real_dense), so the distinction is intentional and
-//     // no change is made for CPU.
-// #if (DNNL_GPU_RUNTIME != DNNL_RUNTIME_NONE \
-//         && DNNL_GPU_VENDOR == DNNL_VENDOR_INTEL)
-//     if (engine_kind == dnnl_gpu
-//             && has_bench_mode_bit(mode_bit_t::perf)
-//             && !has_bench_mode_bit(mode_bit_t::corr)) {
-//         bench_mode_modifier |= mode_modifier_t::no_ref_memory;
-//     }
-// #endif
+    // For Intel GPUs in --mode=P, auto-enable no_ref_memory to skip
+    // fill_random_dense() and align data filling with --mode=F.
+#if (DNNL_GPU_RUNTIME != DNNL_RUNTIME_NONE \
+        && DNNL_GPU_VENDOR == DNNL_VENDOR_INTEL)
+    if (engine_kind == dnnl_gpu
+            && has_bench_mode_bit(mode_bit_t::perf)
+            && !has_bench_mode_bit(mode_bit_t::corr)) {
+        bench_mode_modifier |= mode_modifier_t::no_ref_memory;
+    }
+#endif
 
     if (has_bench_mode_modifier(mode_modifier_t::no_ref_memory)) {
         if (has_bench_mode_bit(mode_bit_t::corr)) {
