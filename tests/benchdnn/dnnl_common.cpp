@@ -1781,7 +1781,6 @@ engine_t::engine_t(dnnl_engine_kind_t engine_kind) : is_owner_(true) {
     dnnl_status_t status = dnnl_engine_create(&engine_, engine_kind, idx);
     if (engine_kind == dnnl_cpu && status != dnnl_success)
         maybe_print_cpu_engine_error_message();
-
     if (has_bench_mode_modifier(mode_modifier_t::no_ref_memory)) {
         if (has_bench_mode_bit(mode_bit_t::corr)) {
             BENCHDNN_PRINT(0, "%s\n",
