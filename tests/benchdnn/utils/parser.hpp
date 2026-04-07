@@ -330,6 +330,7 @@ bool parse_driver_shared_settings(S &s, const S &def, const char *str) {
 void catch_unknown_options(const char *str);
 
 int parse_last_argument();
+void finalize_bench_mode();
 
 // Function returns a substring of a given string @p `s`, using @p `start_pos`
 // to start a search from this index in string and @p `delim` as a stop symbol

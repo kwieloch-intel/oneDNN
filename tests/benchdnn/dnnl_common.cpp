@@ -804,7 +804,6 @@ int measure_perf(const thr_ctx_t &ctx, res_t *res, perf_function_t &perf_func,
         v_args[j] = args_t(mem_map[j]);
         execute_unmap_args(v_args[j], dnnl_args[j]);
     }
-
     execute_unmap_args(args, dnnl_args[0]);
 
     auto &t = res->timer_map.perf_timer();
@@ -1782,26 +1781,6 @@ engine_t::engine_t(dnnl_engine_kind_t engine_kind) : is_owner_(true) {
     dnnl_status_t status = dnnl_engine_create(&engine_, engine_kind, idx);
     if (engine_kind == dnnl_cpu && status != dnnl_success)
         maybe_print_cpu_engine_error_message();
-
-    // Prohibit --mode=CP: it is unused, broken, and correctness data
-    // filling produces unreliable performance numbers on GPUs.
-    if (has_bench_mode_bit(mode_bit_t::corr)
-            && has_bench_mode_bit(mode_bit_t::perf)) {
-        BENCHDNN_PRINT(0, "%s\n",
-                "Error: --mode=CP is not supported. Use --mode=C and "
-                "--mode=P (or --mode=F) separately.");
-        status = dnnl_invalid_arguments;
-    }
-
-    // For Intel GPUs in --mode=P, auto-enable no_ref_memory to skip
-    // fill_random_dense() and align data filling with --mode=F.
-#if (DNNL_GPU_RUNTIME != DNNL_RUNTIME_NONE \
-        && DNNL_GPU_VENDOR == DNNL_VENDOR_INTEL)
-    if (engine_kind == dnnl_gpu && has_bench_mode_bit(mode_bit_t::perf)
-            && !has_bench_mode_bit(mode_bit_t::corr)) {
-        bench_mode_modifier |= mode_modifier_t::no_ref_memory;
-    }
-#endif
 
     if (has_bench_mode_modifier(mode_modifier_t::no_ref_memory)) {
         if (has_bench_mode_bit(mode_bit_t::corr)) {

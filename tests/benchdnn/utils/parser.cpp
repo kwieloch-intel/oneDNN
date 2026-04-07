@@ -1933,4 +1933,26 @@ std::string get_substr(const std::string &s, size_t &start_pos, char delim,
     return sub;
 }
 
+void finalize_bench_mode() {
+    // Reject combined correctness+performance mode: its correctness-data
+    // filling leads to unreliable performance measurements on GPUs.
+    if (has_bench_mode_bit(mode_bit_t::corr)
+            && has_bench_mode_bit(mode_bit_t::perf)) {
+        BENCHDNN_PRINT(0, "%s\n",
+                "Error: --mode=CP is not supported. Use --mode=C and "
+                "--mode=P (or --mode=F) separately.");
+        SAFE_V(FAIL);
+    }
+
+    // For Intel GPUs in --mode=P, auto-enable no_ref_memory to skip
+    // fill_random_dense() and align data filling with --mode=F.
+#if (DNNL_GPU_RUNTIME != DNNL_RUNTIME_NONE \
+        && DNNL_GPU_VENDOR == DNNL_VENDOR_INTEL)
+    if (engine_tgt_kind == dnnl_gpu && has_bench_mode_bit(mode_bit_t::perf)
+            && !has_bench_mode_bit(mode_bit_t::corr)) {
+        bench_mode_modifier |= mode_modifier_t::no_ref_memory;
+    }
+#endif
+}
+
 } // namespace parser
