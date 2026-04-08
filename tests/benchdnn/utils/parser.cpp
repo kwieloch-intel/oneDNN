@@ -1664,8 +1664,7 @@ static bool parse_mode(
 #if (DNNL_GPU_RUNTIME != DNNL_RUNTIME_NONE \
         && DNNL_GPU_VENDOR == DNNL_VENDOR_INTEL)
                     if (engine_tgt_kind == dnnl_gpu)
-                        bench_mode_modifier
-                                |= mode_modifier_t::no_ref_memory;
+                        bench_mode_modifier |= mode_modifier_t::no_ref_memory;
 #endif
                     break;
                 case 'f':
