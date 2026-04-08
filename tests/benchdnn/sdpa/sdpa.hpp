@@ -54,6 +54,7 @@ struct settings_t : public base_settings_t {
 
     prb_vdims_t prb_vdims;
 
+    std::vector<dir_t> dir {FWD_I};
     std::vector<std::vector<dnnl_data_type_t>> dt {{dnnl_f32}};
     std::vector<std::string> qtag {tag::abx}, ktag {tag::abx}, vtag {tag::abx},
             dtag {tag::abx};
@@ -69,9 +70,10 @@ struct settings_t : public base_settings_t {
     void reset() { *this = settings_t(perf_template); }
 
     bool has_single_setup() const override {
-        return dt.size() == 1 && qtag.size() == 1 && ktag.size() == 1
-                && vtag.size() == 1 && dtag.size() == 1 && mask_type.size() == 1
-                && scale_type.size() == 1 && kv_head_number.size() == 1
+        return dir.size() == 1 && dt.size() == 1 && qtag.size() == 1
+                && ktag.size() == 1 && vtag.size() == 1 && dtag.size() == 1
+                && mask_type.size() == 1 && scale_type.size() == 1
+                && kv_head_number.size() == 1
                 && base_settings_t::has_single_setup();
     }
 };
@@ -79,14 +81,15 @@ struct settings_t : public base_settings_t {
 struct prb_t : public prb_vdims_t {
     // A ctor with common interface across all drivers.
     prb_t(const settings_t &s)
-        : prb_t(s.prb_vdims, s.dt[0], s.qtag[0], s.ktag[0], s.vtag[0],
-                  s.dtag[0], s.mask_type[0], s.scale_type[0],
+        : prb_t(s.prb_vdims, s.dir[0], s.dt[0], s.qtag[0], s.ktag[0],
+                  s.vtag[0], s.dtag[0], s.mask_type[0], s.scale_type[0],
                   s.kv_head_number[0], s.attributes.front(), s.ctx_init[0],
                   s.ctx_exe[0], s.impl_filter) {
         SAFE_V(s.has_single_setup() ? OK : FAIL);
     }
 
-    prb_t(const prb_vdims_t &prb_vdims, const std::vector<dnnl_data_type_t> &dt,
+    prb_t(const prb_vdims_t &prb_vdims, dir_t dir,
+            const std::vector<dnnl_data_type_t> &dt,
             const std::string &qtag, const std::string &ktag,
             const std::string &vtag, const std::string &dtag,
             mask_type_t mask_type, scale_type_t scale_type,
@@ -94,6 +97,7 @@ struct prb_t : public prb_vdims_t {
             const thr_ctx_t &ctx_init, const thr_ctx_t &ctx_exe,
             const impl_filter_t &impl_filter)
         : prb_vdims_t(prb_vdims)
+        , dir(dir)
         , dt(dt)
         , qtag(qtag)
         , ktag(ktag)
@@ -128,14 +132,16 @@ struct prb_t : public prb_vdims_t {
         dst_dims[ndims - 2] = n_queries;
         dst_dims[ndims - 1] = n_values;
 
-        // Compute mask dims if needed.
-        if (with_mask()) {
-            msk_dims.resize(ndims);
-            for (int i = 0; i < ndims - 2; i++)
-                msk_dims[i] = qdims[i];
-            msk_dims[ndims - 2] = n_queries;
-            msk_dims[ndims - 1] = n_keys;
-        }
+        // Score dims (batch x heads x seq_q x seq_kv) — used for mask,
+        // dropout, and backward's dS tensor.
+        score_dims.resize(ndims);
+        for (int i = 0; i < ndims - 2; i++)
+            score_dims[i] = qdims[i];
+        score_dims[ndims - 2] = n_queries;
+        score_dims[ndims - 1] = n_keys;
+
+        // Compute mask dims if needed (same as score_dims).
+        if (with_mask()) { msk_dims = score_dims; }
 
         mb = 1;
         for (int i = 0; i < ndims - 2; i++)
@@ -148,7 +154,7 @@ struct prb_t : public prb_vdims_t {
     }
 
     int64_t n_queries, head_size, n_keys, n_values, mb;
-    dir_t dir = FLAG_FWD; // Always forward.
+    dir_t dir;
     std::vector<dnnl_data_type_t> dt;
     std::string qtag, ktag, vtag, dtag;
     mask_type_t mask_type;
@@ -163,6 +169,7 @@ struct prb_t : public prb_vdims_t {
     double ops;
     dims_t dst_dims;
     dims_t msk_dims;
+    dims_t score_dims;
 
     const dims_t &q_dims() const { return vdims[0]; }
     const dims_t &k_dims() const { return vdims[1]; }

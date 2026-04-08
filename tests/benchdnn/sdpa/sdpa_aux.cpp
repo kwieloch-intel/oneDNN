@@ -63,6 +63,8 @@ const char *scale_type2str(scale_type_t st) {
 dnnl_data_type_t prb_t::get_dt(data_kind_t data_kind) const {
     switch (data_kind) {
         case SRC: return q_dt();
+        case SRC_1: return k_dt();
+        case SRC_2: return v_dt();
         case WEI: return k_dt(); // K and V share WEI kind
         case DST: return dst_dt();
         default: assert(!"unexpected"); return dnnl_data_type_undef;
@@ -84,6 +86,17 @@ benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> prb_t::get_md(int arg) const {
                 return dnn_mem_t::init_md(
                         ndims, msk_dims.data(), dnnl_f32, tag::abx);
             return dnn_mem_t::init_md();
+        case DNNL_ARG_DIFF_SRC_0: // diff_Q
+            return dnn_mem_t::init_md(ndims, q_dims().data(), q_dt(), qtag);
+        case DNNL_ARG_DIFF_SRC_1: // diff_K
+            return dnn_mem_t::init_md(ndims, k_dims().data(), k_dt(), ktag);
+        case DNNL_ARG_DIFF_SRC_2: // diff_V
+            return dnn_mem_t::init_md(ndims, v_dims().data(), v_dt(), vtag);
+        case DNNL_ARG_DIFF_DST:
+            return dnn_mem_t::init_md(ndims, dst_dims.data(), dst_dt(), dtag);
+        case DNNL_ARG_DIFF_SRC_3: // dS (score gradient)
+            return dnn_mem_t::init_md(
+                    ndims, score_dims.data(), dnnl_f32, tag::abx);
         default:
             assert(!"unsupported arg");
             return make_benchdnn_dnnl_wrapper<dnnl_memory_desc_t>(nullptr);
@@ -94,6 +107,8 @@ std::string prb_t::set_repro_line() {
     dnnl::impl::stringstream_t s;
     dump_global_params(s);
     settings_t def;
+
+    if (canonical || dir != def.dir[0]) s << "--dir=" << dir << " ";
 
     bool has_default_dts = true;
     for (const auto &i_dt : dt)
