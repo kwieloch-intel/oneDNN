@@ -7,6 +7,11 @@
 
 where *sdpa-knobs* are:
 
+ - `--dir={FWD_I [default], FWD_D, BWD_D}` -- propagation direction.
+            `FWD_I` is forward inference, `FWD_D` is forward training (needed
+            for workspace output used by backward), `BWD_D` is backward data
+            which computes gradients for Q, K, and V.
+            Refer to [direction](knobs_dir.md) for details.
  - `--dt={f32:f32:f32:f32 [default], ...}` -- source (Q, K, V) and destination
             data types. Interface supports broadcasting, when a single input is
             provided, e.g., `--dt=f32`, the value is applied for all tensors.
@@ -54,6 +59,13 @@ The reference executes each step independently using f32 matmul and softmax
 primitives on the CPU. The driver compares the fused primitive output against
 this stepwise reference.
 
+For backward (`--dir=BWD_D`), the driver creates a forward-training primitive
+(to produce workspace) followed by a backward primitive. The backward reference
+recomputes the forward intermediates (softmax probabilities), then derives
+gradients via softmax backward and transposed matmuls:
+`dS = softmax_bwd(S2, dO * V^T)`, `dQ = scale(dS) * K^T`, `dK = Q^T * scale(dS)`,
+`dV = S2^T * dO`, with GQA reduction where applicable.
+
 ## Examples
 
 Run the default validation set of SDPA using `inputs/sdpa/shapes_basic` file:
@@ -78,6 +90,12 @@ Run SDPA performance benchmark on GPU:
     ./benchdnn --mode=f --sdpa --engine=gpu --dt=f16 \
                --mask_type=causal_bottom_right \
                1x32x2048x128:1x32x128x2048:1x32x2048x128
+```
+
+Run SDPA backward (training) on GPU:
+``` sh
+    ./benchdnn --sdpa --engine=gpu --dir=BWD_D --dt=f16 \
+               1x12x128x64:1x12x64x128:1x12x128x64
 ```
 
 More examples with different driver options can be found at

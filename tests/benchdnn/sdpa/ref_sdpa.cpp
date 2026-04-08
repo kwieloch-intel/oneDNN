@@ -111,56 +111,60 @@ void expand_kv_heads(const dnn_mem_t &src, dnn_mem_t &dst, int64_t outer_batch,
     }
 }
 
+// GQA/MQA helper: reduce (sum) Q-head groups back into KV-head count.
+void reduce_kv_heads(const dnn_mem_t &src, const dnn_mem_t &dst,
+        int64_t outer_batch, int64_t q_heads, int64_t kv_heads,
+        int64_t head_elems) {
+    const float *s = static_cast<float *>(src);
+    float *d = static_cast<float *>(dst);
+    const int64_t groups = q_heads / kv_heads;
+    std::memset(d, 0, outer_batch * kv_heads * head_elems * sizeof(float));
+    for (int64_t ob = 0; ob < outer_batch; ob++) {
+        for (int64_t kvh = 0; kvh < kv_heads; kvh++) {
+            float *out = d + (ob * kv_heads + kvh) * head_elems;
+            for (int64_t g = 0; g < groups; g++) {
+                const float *in
+                        = s + (ob * q_heads + kvh * groups + g) * head_elems;
+                for (int64_t e = 0; e < head_elems; e++)
+                    out[e] += in[e];
+            }
+        }
+    }
+}
+
+// Transpose last two dims of a 3D f32 memory: [d0, d1, d2] → [d0, d2, d1].
+dnn_mem_t transpose_2d(
+        dnnl_engine_t eng, const dnn_mem_t &src, int64_t d0, int64_t d1,
+        int64_t d2) {
+    auto dst = make_3d(eng, d0, d2, d1);
+    const float *s = static_cast<float *>(src);
+    float *d = static_cast<float *>(dst);
+    for (int64_t i = 0; i < d0; i++)
+        for (int64_t j = 0; j < d1; j++)
+            for (int64_t k = 0; k < d2; k++)
+                d[(i * d2 + k) * d1 + j] = s[(i * d1 + j) * d2 + k];
+    return dst;
+}
+
 } // anonymous namespace
 
-void compute_ref(
-        const prb_t *prb, dir_t dir, const args_t &args, dnnl_primitive_t) {
-    const auto &eng = get_cpu_engine();
-    dnnl_stream_t strm {};
-    DNN_SAFE_V(dnnl_stream_create(&strm, eng, dnnl_stream_default_flags));
-
-    const dnn_mem_t &q_m = args.find(DNNL_ARG_SRC_0);
-    const dnn_mem_t &k_m = args.find(DNNL_ARG_SRC_1);
-    const dnn_mem_t &v_m = args.find(DNNL_ARG_SRC_2);
-    const dnn_mem_t &dst_m = args.find(DNNL_ARG_DST);
-
-    const int64_t MB = prb->mb; // product of all batch dims (incl. heads)
+// Shared forward computation: computes score, applies scale/mask/causal,
+// softmax, optional dropout, and optionally the final matmul.
+// Returns `score2` = softmax probs (pre-dropout, for backward softmax_bwd)
+// and `score2_dp` = post-dropout probs (for BMM2 and backward dV).
+// When dropout is not configured, score2_dp == score2.
+static void compute_fwd(const prb_t *prb, dnnl_engine_t eng,
+        dnnl_stream_t strm, const dnn_mem_t &q_ref, const dnn_mem_t &k_ref,
+        const dnn_mem_t &v_ref, const args_t &args, dnn_mem_t &score2,
+        dnn_mem_t &score2_dp, dnn_mem_t *out) {
+    const int64_t MB = prb->mb;
     const int64_t SQ = prb->n_queries;
     const int64_t SK = prb->n_keys;
     const int64_t H = prb->head_size;
     const int64_t V = prb->n_values;
-    const int nd = prb->ndims;
-
-    // GQA/MQA: K/V may have fewer heads than Q.
-    const int64_t q_heads = (nd >= 3) ? prb->q_dims()[nd - 3] : 1;
-    const int64_t kv_heads = (nd >= 3 && prb->kv_head_number > 0)
-            ? prb->kv_head_number
-            : q_heads;
-    const int64_t outer_batch = MB / q_heads;
-    const bool is_gqa = (kv_heads != q_heads);
-
-    // 3-D f32 memories for matmul: [MB, rows, cols].
-    auto q_ref = make_3d(eng, MB, SQ, H);
-    auto k_ref = make_3d(eng, MB, H, SK);
-    auto v_ref = make_3d(eng, MB, SK, V);
-    auto score = make_3d(eng, MB, SQ, SK);
-    auto out = make_3d(eng, MB, SQ, V);
-
-    // Copy Q (always same batch count).
-    std::memcpy(static_cast<float *>(q_ref), static_cast<float *>(q_m),
-            MB * SQ * H * sizeof(float));
-
-    if (!is_gqa) {
-        std::memcpy(static_cast<float *>(k_ref), static_cast<float *>(k_m),
-                MB * H * SK * sizeof(float));
-        std::memcpy(static_cast<float *>(v_ref), static_cast<float *>(v_m),
-                MB * SK * V * sizeof(float));
-    } else {
-        expand_kv_heads(k_m, k_ref, outer_batch, q_heads, kv_heads, H * SK);
-        expand_kv_heads(v_m, v_ref, outer_batch, q_heads, kv_heads, SK * V);
-    }
 
     // Step 1: score = Q x K  (matmul primitive).
+    auto score = make_3d(eng, MB, SQ, SK);
     exec_matmul(eng, strm, q_ref, k_ref, score);
 
     // Step 2: Scale.
@@ -199,14 +203,201 @@ void compute_ref(
     }
 
     // Step 5: Softmax over K dimension (axis = 2 of the 3-D score tensor).
-    exec_softmax(eng, strm, score, /* axis = */ 2);
+    // Copy to score2 and run softmax in-place there to preserve score if
+    // needed.
+    score2 = make_3d(eng, MB, SQ, SK);
+    std::memcpy(static_cast<float *>(score2), static_cast<float *>(score),
+            MB * SQ * SK * sizeof(float));
+    exec_softmax(eng, strm, score2, /* axis = */ 2);
 
-    // Step 6: output = prob x V  (matmul primitive).
-    exec_matmul(eng, strm, score, v_ref, out);
+    // Step 5b: Dropout (optional). score2_dp starts as a copy of score2;
+    // when dropout is configured, dropped elements are zeroed and the rest
+    // scaled by 1/(1-p).  score2 keeps the clean probs for backward.
+    const int64_t score_n = MB * SQ * SK;
+    score2_dp = make_3d(eng, MB, SQ, SK);
+    std::memcpy(static_cast<float *>(score2_dp),
+            static_cast<float *>(score2), score_n * sizeof(float));
+    if (!prb->attr.dropout.is_def()) {
+        float *sp = static_cast<float *>(score2_dp);
+        const dnn_mem_t &dropout_mask
+                = args.find(DNNL_ARG_ATTR_DROPOUT_MASK);
+        for (int64_t i = 0; i < score_n; i++)
+            maybe_dropout(prb->attr, sp[i], i, dropout_mask);
+    }
 
-    // Copy result to DST.
-    std::memcpy(static_cast<float *>(dst_m), static_cast<float *>(out),
-            MB * SQ * V * sizeof(float));
+    // Step 6 (optional): output = prob_dp x V  (matmul primitive).
+    if (out) {
+        *out = make_3d(eng, MB, SQ, V);
+        exec_matmul(eng, strm, score2_dp, v_ref, *out);
+    }
+}
+
+void compute_ref(
+        const prb_t *prb, dir_t dir, const args_t &args, dnnl_primitive_t) {
+    const auto &eng = get_cpu_engine();
+    dnnl_stream_t strm {};
+    DNN_SAFE_V(dnnl_stream_create(&strm, eng, dnnl_stream_default_flags));
+
+    const dnn_mem_t &q_m = args.find(DNNL_ARG_SRC_0);
+    const dnn_mem_t &k_m = args.find(DNNL_ARG_SRC_1);
+    const dnn_mem_t &v_m = args.find(DNNL_ARG_SRC_2);
+    const dnn_mem_t &dst_m = args.find(DNNL_ARG_DST);
+
+    const int64_t MB = prb->mb; // product of all batch dims (incl. heads)
+    const int64_t SQ = prb->n_queries;
+    const int64_t SK = prb->n_keys;
+    const int64_t H = prb->head_size;
+    const int64_t V = prb->n_values;
+    const int nd = prb->ndims;
+
+    // GQA/MQA: K/V may have fewer heads than Q.
+    const int64_t q_heads = (nd >= 3) ? prb->q_dims()[nd - 3] : 1;
+    const int64_t kv_heads = (nd >= 3 && prb->kv_head_number > 0)
+            ? prb->kv_head_number
+            : q_heads;
+    const int64_t outer_batch = MB / q_heads;
+    const bool is_gqa = (kv_heads != q_heads);
+
+    // 3-D f32 memories for matmul: [MB, rows, cols].
+    auto q_ref = make_3d(eng, MB, SQ, H);
+    auto k_ref = make_3d(eng, MB, H, SK);
+    auto v_ref = make_3d(eng, MB, SK, V);
+
+    // Copy Q (always same batch count).
+    std::memcpy(static_cast<float *>(q_ref), static_cast<float *>(q_m),
+            MB * SQ * H * sizeof(float));
+
+    if (!is_gqa) {
+        std::memcpy(static_cast<float *>(k_ref), static_cast<float *>(k_m),
+                MB * H * SK * sizeof(float));
+        std::memcpy(static_cast<float *>(v_ref), static_cast<float *>(v_m),
+                MB * SK * V * sizeof(float));
+    } else {
+        expand_kv_heads(k_m, k_ref, outer_batch, q_heads, kv_heads, H * SK);
+        expand_kv_heads(v_m, v_ref, outer_batch, q_heads, kv_heads, SK * V);
+    }
+
+    if (dir & FLAG_FWD) {
+        dnn_mem_t score2, score2_dp, out;
+        compute_fwd(prb, eng, strm, q_ref, k_ref, v_ref, args, score2,
+                score2_dp, &out);
+
+        // Copy result to DST.
+        std::memcpy(static_cast<float *>(dst_m), static_cast<float *>(out),
+                MB * SQ * V * sizeof(float));
+    }
+
+    if (dir & FLAG_BWD) {
+        const dnn_mem_t &diff_dst_m = args.find(DNNL_ARG_DIFF_DST);
+        const dnn_mem_t &diff_q_m = args.find(DNNL_ARG_DIFF_SRC_0);
+        const dnn_mem_t &diff_k_m = args.find(DNNL_ARG_DIFF_SRC_1);
+        const dnn_mem_t &diff_v_m = args.find(DNNL_ARG_DIFF_SRC_2);
+
+        // Recompute forward intermediates to get softmax probabilities.
+        // score2 = pre-dropout probs (for softmax_bwd), score2_dp = post-
+        // dropout probs (for dV).
+        dnn_mem_t score2, score2_dp;
+        compute_fwd(prb, eng, strm, q_ref, k_ref, v_ref, args, score2,
+                score2_dp, /* out = */ nullptr);
+
+        // dO in 3-D layout [MB, SQ, V].
+        auto dO = make_3d(eng, MB, SQ, V);
+        std::memcpy(static_cast<float *>(dO),
+                static_cast<float *>(diff_dst_m),
+                MB * SQ * V * sizeof(float));
+
+        // B1: dS2 = dO × V^T  →  [MB, SQ, SK]
+        auto v_t = transpose_2d(eng, v_ref, MB, SK, V);
+        auto dS2 = make_3d(eng, MB, SQ, SK);
+        exec_matmul(eng, strm, dO, v_t, dS2);
+
+        // B2: dV = S2_dp^T × dO  →  [MB, SK, V]  (uses post-dropout probs)
+        auto s2_t = transpose_2d(eng, score2_dp, MB, SQ, SK);
+        auto dV_full = make_3d(eng, MB, SK, V);
+        exec_matmul(eng, strm, s2_t, dO, dV_full);
+
+        // B2b: Dropout backward on dS2 (same mask, same scaling as fwd).
+        if (!prb->attr.dropout.is_def()) {
+            float *dsp = static_cast<float *>(dS2);
+            const dnn_mem_t &dropout_mask
+                    = args.find(DNNL_ARG_ATTR_DROPOUT_MASK);
+            for (int64_t i = 0, n = MB * SQ * SK; i < n; i++)
+                maybe_dropout(prb->attr, dsp[i], i, dropout_mask);
+        }
+
+        // B3: softmax backward — dS = softmax_bwd(S2, dS2)
+        // Uses pre-dropout probs (score2) as the forward DST.
+        auto dS = make_3d(eng, MB, SQ, SK);
+        {
+            // Create forward pd as hint for backward.
+            const auto alg = static_cast<dnnl_alg_kind_t>(
+                    dnnl::impl::alg_kind::softmax_accurate_inf_as_zero);
+            dnnl_primitive_desc_t fwd_pd {};
+            DNN_SAFE_V(dnnl_softmax_forward_primitive_desc_create(&fwd_pd, eng,
+                    dnnl_forward_training, alg, score2.md_, score2.md_,
+                    /* axis = */ 2, nullptr));
+            auto fwd_pd_w = make_benchdnn_dnnl_wrapper(fwd_pd);
+
+            dnnl_primitive_desc_t bwd_pd {};
+            DNN_SAFE_V(dnnl_softmax_backward_primitive_desc_create(&bwd_pd, eng,
+                    dnnl_softmax_accurate, dS.md_, dS2.md_, score2.md_,
+                    /* axis = */ 2, fwd_pd, nullptr));
+            auto bwd_pd_w = make_benchdnn_dnnl_wrapper(bwd_pd);
+
+            dnnl_primitive_t bwd_prim {};
+            DNN_SAFE_V(dnnl_primitive_create(&bwd_prim, bwd_pd));
+            auto bwd_prim_w = make_benchdnn_dnnl_wrapper(bwd_prim);
+
+            dnnl_exec_arg_t bwd_args[] = {
+                    {DNNL_ARG_DST, score2.m_},
+                    {DNNL_ARG_DIFF_DST, dS2.m_},
+                    {DNNL_ARG_DIFF_SRC, dS.m_},
+            };
+            DNN_SAFE_V(dnnl_primitive_execute(bwd_prim, strm, 3, bwd_args));
+            DNN_SAFE_V(dnnl_stream_wait(strm));
+        }
+
+        // B4: Scale dS.
+        {
+            float sv = 1.0f / std::sqrt(static_cast<float>(H));
+            if (prb->with_scale()) {
+                float s = args.find(DNNL_ARG_SCALE).get_f32_elem(0);
+                sv = prb->invert_scale() ? 1.0f / s : s;
+            }
+            float *dsp = static_cast<float *>(dS);
+            for (int64_t i = 0, n = MB * SQ * SK; i < n; i++)
+                dsp[i] *= sv;
+        }
+
+        // B5: dQ = dS × K^T  →  [MB, SQ, H]
+        // K is [MB, H, SK], K^T is [MB, SK, H].
+        auto k_t = transpose_2d(eng, k_ref, MB, H, SK);
+        auto dQ = make_3d(eng, MB, SQ, H);
+        exec_matmul(eng, strm, dS, k_t, dQ);
+
+        // B6: dK = Q^T × dS  →  [MB, H, SK]
+        auto q_t = transpose_2d(eng, q_ref, MB, SQ, H);
+        auto dK_full = make_3d(eng, MB, H, SK);
+        exec_matmul(eng, strm, q_t, dS, dK_full);
+
+        // Copy/reduce results into output memories.
+        std::memcpy(static_cast<float *>(diff_q_m),
+                static_cast<float *>(dQ), MB * SQ * H * sizeof(float));
+
+        if (!is_gqa) {
+            std::memcpy(static_cast<float *>(diff_k_m),
+                    static_cast<float *>(dK_full),
+                    MB * H * SK * sizeof(float));
+            std::memcpy(static_cast<float *>(diff_v_m),
+                    static_cast<float *>(dV_full),
+                    MB * SK * V * sizeof(float));
+        } else {
+            reduce_kv_heads(dK_full, diff_k_m, outer_batch, q_heads, kv_heads,
+                    H * SK);
+            reduce_kv_heads(dV_full, diff_v_m, outer_batch, q_heads, kv_heads,
+                    SK * V);
+        }
+    }
 
     DNN_SAFE_V(dnnl_stream_destroy(strm));
 }

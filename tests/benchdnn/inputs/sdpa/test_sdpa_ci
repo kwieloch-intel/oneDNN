@@ -19,3 +19,18 @@
 --reset
 --dt=f16,bf16
 --batch=shapes_transformer_gpu
+
+# Forward training (needed for backward; verifies DST with training prop)
+--reset
+--dir=FWD_D
+--dt=f16,bf16
+--batch=shapes_transformer_gpu
+
+# Backward
+--reset
+--dir=BWD_D
+--dt=f16,bf16
+--batch=shapes_bwd
+--mask_type=causal_top_left
+--dt=f16
+--batch=shapes_bwd

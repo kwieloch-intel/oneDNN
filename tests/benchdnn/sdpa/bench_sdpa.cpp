@@ -29,6 +29,7 @@ TASK_EXECUTOR_DECL_TYPES;
 
 void check_correctness(
         const settings_t &s, driver_task_executor_t &task_executor) {
+    for_(const auto &i_dir : s.dir)
     for_(const auto &i_dt : s.dt)
     for_(const auto &i_qtag : s.qtag)
     for_(const auto &i_ktag : s.ktag)
@@ -40,9 +41,9 @@ void check_correctness(
     for_(const auto &i_attr : s.attributes)
     for_(const auto &i_ctx_init : s.ctx_init)
     for (const auto &i_ctx_exe : s.ctx_exe) {
-        const prb_t prb(s.prb_vdims, i_dt, i_qtag, i_ktag, i_vtag, i_dtag,
-                i_mask_type, i_scale_type, i_kv_head_number, i_attr, i_ctx_init,
-                i_ctx_exe, s.impl_filter);
+        const prb_t prb(s.prb_vdims, i_dir, i_dt, i_qtag, i_ktag, i_vtag,
+                i_dtag, i_mask_type, i_scale_type, i_kv_head_number, i_attr,
+                i_ctx_init, i_ctx_exe, s.impl_filter);
         if (s.pattern && !match_regex(prb.str(), s.pattern)) return;
 
         task_executor.submit(prb, s.perf_template, createit, checkit, doit);
@@ -100,6 +101,7 @@ int bench(int argc, char **argv) {
     for (; argc > 0; --argc, ++argv) {
         const bool parsed_options = parse_bench_settings(argv[0])
                 || parse_batch(bench, argv[0])
+                || parse_dir(s.dir, def.dir, argv[0])
                 || parse_multi_dt(s.dt, def.dt, argv[0], "dt")
                 || parse_tag(s.qtag, def.qtag, argv[0], "qtag")
                 || parse_tag(s.ktag, def.ktag, argv[0], "ktag")

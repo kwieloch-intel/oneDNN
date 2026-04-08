@@ -41,6 +41,7 @@ dnnl_status_t init_pd(init_pd_args_t<prb_t> &init_pd_args) {
     const prb_t *prb = init_pd_args.prb;
     res_t *res = init_pd_args.res;
     bool force_f32_dt = init_pd_args.force_f32_dt;
+    const dir_t dir = init_pd_args.dir;
 
     auto q_dt = force_f32_dt ? dnnl_f32 : prb->q_dt();
     auto k_dt = force_f32_dt ? dnnl_f32 : prb->k_dt();
@@ -71,15 +72,43 @@ dnnl_status_t init_pd(init_pd_args_t<prb_t> &init_pd_args) {
     // Default to invert_scale=false; scale is filled in init_ref_memory_args.
     bool invert = prb->with_scale() ? prb->invert_scale() : false;
 
+    // Build attr_args for dropout mask md if configured.
+    attr_args_t attr_args;
+    if (!prb->attr.dropout.is_def()) {
+        attr_args.prepare_post_ops_mds(
+                prb->attr, prb->ndims, prb->score_dims.data());
+    }
     auto dnnl_attr = make_benchdnn_dnnl_wrapper(
-            create_dnnl_attr(prb->attr, attr_args_t(), prb->ndims));
+            create_dnnl_attr(prb->attr, attr_args, prb->ndims));
 
-    TIME_C_PD(DNN_SAFE_STATUS(sdpa_primitive_desc_create(&init_pd_args.pd,
-            init_pd_args.engine, q_d, k_d, v_d, dst_d,
-            prb->with_mask() ? (const_dnnl_memory_desc_t)mask_d : nullptr,
-            scale_d, invert, kv_hn, attn_mask_type_val, softmax_alg,
-            dnnl_forward_inference, dnnl_attr,
-            /* kq_attr = */ nullptr, /* vs_attr = */ nullptr)));
+    const auto mask_ptr
+            = prb->with_mask() ? (const_dnnl_memory_desc_t)mask_d : nullptr;
+
+    if (dir & FLAG_FWD) {
+        auto prop = prb->dir & FLAG_INF ? dnnl_forward_inference
+                                        : dnnl_forward_training;
+
+        TIME_C_PD(DNN_SAFE_STATUS(sdpa_primitive_desc_create(&init_pd_args.pd,
+                init_pd_args.engine, q_d, k_d, v_d, dst_d, mask_ptr, scale_d,
+                invert, kv_hn, attn_mask_type_val, softmax_alg, prop,
+                dnnl_attr, /* kq_attr = */ nullptr,
+                /* vs_attr = */ nullptr)));
+    } else {
+        auto diff_q_d = create_md(prb->ndims, prb->q_dims(), q_dt, prb->qtag);
+        auto diff_k_d = create_md(prb->ndims, prb->k_dims(), k_dt, prb->ktag);
+        auto diff_v_d
+                = create_md(prb->ndims, prb->v_dims(), v_dt, prb->vtag);
+        auto diff_dst_d
+                = create_md(prb->ndims, prb->dst_dims, dst_dt, prb->dtag);
+
+        // Follow the .cpp / C++ wrapper parameter order (mask/scale
+        // before diff descs) which differs from the .hpp declaration.
+        TIME_C_PD(DNN_SAFE_STATUS(sdpa_primitive_desc_create(&init_pd_args.pd,
+                init_pd_args.engine, q_d, k_d, v_d, dst_d, mask_ptr, scale_d,
+                diff_q_d, diff_k_d, diff_v_d, diff_dst_d,
+                /* dS = */ nullptr, invert, kv_hn, attn_mask_type_val,
+                softmax_alg, dnnl_attr, init_pd_args.hint)));
+    }
 
     return dnnl_success;
 }
@@ -189,28 +218,48 @@ void skip_invalid_prb(const prb_t *prb, res_t *res) {
 
 void setup_cmp(compare::compare_t &cmp, const prb_t *prb, data_kind_t kind,
         const args_t &ref_args) {
-    // SDPA chains two matmuls and softmax; use a generous relative threshold.
-    const float trh = 8.f * (1 + prb->n_keys) * epsilon_dt(prb->dst_dt());
+    const bool is_bwd = (kind == SRC || kind == SRC_1 || kind == SRC_2);
+
+    // Backward chains more matmuls and softmax_backward; needs looser
+    // thresholds due to catastrophic cancellation in S*(dP - Di) and
+    // accumulated atomic adds.
+    const float trh_coeff = is_bwd ? 32.f : 8.f;
+    const float trh = trh_coeff * (1 + prb->n_keys) * epsilon_dt(prb->dst_dt());
     cmp.set_threshold(trh);
 
-    const float abs_trh = 2e-3f;
+    // bf16 backward produces element diffs up to ~3e-2 near-zero values.
+    const float abs_trh = is_bwd ? 5e-2f : 2e-3f;
     cmp.set_driver_check_function(
             [abs_trh](const compare::compare_t::driver_check_func_args_t &a)
                     -> bool { return a.diff <= abs_trh; });
 
-    cmp.set_zero_trust_percent(90.f);
+    cmp.set_zero_trust_percent(is_bwd ? 70.f : 90.f);
 }
 
 std::vector<int> supported_exec_args(dir_t dir) {
     // SRC_0=Q, SRC_1=K, SRC_2=V, SHIFT=attn_mask. SCALE is added in doit().
-    static const std::vector<int> exec_args = {
+    static const std::vector<int> exec_fwd_args = {
             DNNL_ARG_SRC_0,
             DNNL_ARG_SRC_1,
             DNNL_ARG_SRC_2,
             DNNL_ARG_DST,
             DNNL_ARG_SHIFT,
+            DNNL_ARG_WORKSPACE,
     };
-    return exec_args;
+    static const std::vector<int> exec_bwd_args = {
+            DNNL_ARG_SRC_0,
+            DNNL_ARG_SRC_1,
+            DNNL_ARG_SRC_2,
+            DNNL_ARG_DST,
+            DNNL_ARG_SHIFT,
+            DNNL_ARG_DIFF_SRC_0,
+            DNNL_ARG_DIFF_SRC_1,
+            DNNL_ARG_DIFF_SRC_2,
+            DNNL_ARG_DIFF_DST,
+            DNNL_ARG_DIFF_SRC_3, // DS
+            DNNL_ARG_WORKSPACE,
+    };
+    return (dir & FLAG_FWD) ? exec_fwd_args : exec_bwd_args;
 }
 
 int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
@@ -235,6 +284,9 @@ int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
         // Scratchpad memory relates to a primitive. If reference needs it,
         // use switch below to define a memory desc for it.
         if (exec_arg == DNNL_ARG_SCRATCHPAD) continue;
+
+        // Workspace connects forward and backward; not filled manually.
+        if (exec_arg == DNNL_ARG_WORKSPACE) continue;
 
         if (exec_arg == DNNL_ARG_SCALE) {
             dnnl_dims_t s_dims = {1};
@@ -270,6 +322,15 @@ int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
                 SAFE(fill_data(exec_arg, SRC, prb, cfg, mem, ref_mem, res),
                         WARN);
                 break;
+            case DNNL_ARG_DIFF_DST:
+                SAFE(fill_data(exec_arg, DST, prb, cfg, mem, ref_mem, res),
+                        WARN);
+                break;
+            case DNNL_ARG_DIFF_SRC_0: // diff_Q — output, not filled.
+            case DNNL_ARG_DIFF_SRC_1: // diff_K — output, not filled.
+            case DNNL_ARG_DIFF_SRC_2: // diff_V — output, not filled.
+            case DNNL_ARG_DIFF_SRC_3: // dS — output, not filled.
+                break;
             default:
                 SAFE(init_ref_memory_args_default_case(
                              exec_arg, mem, ref_mem, prb->attr, res),
@@ -286,8 +347,15 @@ int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
 
 int createit(std::vector<benchdnn_dnnl_wrapper_t<dnnl_primitive_t>> &v_prim,
         const prb_t *prb, res_t *res) {
-    v_prim.resize(1);
-    SAFE(init_prim(prb->ctx_init, v_prim[0], init_pd, prb, res), WARN);
+    v_prim.resize(2); // just fwd or fwd + bwd.
+    SAFE(init_prim(prb->ctx_init, v_prim[0], init_pd, prb, res, FLAG_FWD,
+                 nullptr, /* is_service_prim = */ prb->dir & FLAG_BWD),
+            WARN);
+    if (prb->dir & FLAG_BWD) {
+        SAFE(init_prim(prb->ctx_init, v_prim[1], init_pd, prb, res, FLAG_BWD,
+                     query_pd(v_prim[0])),
+                WARN);
+    }
     return OK;
 }
 
@@ -295,15 +363,24 @@ int checkit(std::vector<benchdnn_dnnl_wrapper_t<dnnl_primitive_t>> &v_prim,
         const prb_t *prb, res_t *res) {
     if (has_bench_mode_bit(mode_bit_t::exec)) {
         SAFE(check_total_size(res), WARN);
+        if (v_prim[1]) SAFE(check_total_size(res), WARN);
     }
     if (has_bench_mode_bit(mode_bit_t::corr)) {
         SAFE(check_caches(v_prim[0], prb, res), WARN);
+        if (v_prim[1]) { SAFE(check_caches(v_prim[1], prb, res), WARN); }
     }
     return OK;
 }
 
-std::vector<data_kind_t> get_kinds_to_check(const prb_t *prb) {
-    std::vector<data_kind_t> check_kinds = {DST};
+std::vector<data_kind_t> get_kinds_to_check(const prb_t *prb, dir_t dir) {
+    std::vector<data_kind_t> check_kinds;
+    if (dir & FLAG_FWD) {
+        // Skip forward validation when it runs as service for backward.
+        if (!(prb->dir & FLAG_BWD)) check_kinds = {DST};
+    } else {
+        // Backward: check diff_Q (SRC), diff_K (SRC_1), diff_V (SRC_2).
+        check_kinds = {SRC, SRC_1, SRC_2};
+    }
     get_kinds_to_check_shared(check_kinds, prb->attr);
     return check_kinds;
 }
@@ -312,11 +389,12 @@ int doit(const std::vector<benchdnn_dnnl_wrapper_t<dnnl_primitive_t>> &v_prim,
         const prb_t *prb, res_t *res) {
     set_zmalloc_max_expected_size(res->mem_size_args.zmalloc_expected_size);
 
-    const auto &prim = v_prim[0];
+    const auto &prim = prb->dir & FLAG_FWD ? v_prim[0] : v_prim[1];
 
     dnn_mem_map_t mem_map, ref_mem_map;
 
-    init_memory_args<prb_t>(mem_map, prb, prim, supported_exec_args(prb->dir));
+    init_memory_args<prb_t>(
+            mem_map, prb, v_prim[0], supported_exec_args(FLAG_FWD));
 
     {
         auto scale_md = dnn_mem_t::init_host_scalar_md(dnnl_f32);
@@ -324,17 +402,46 @@ int doit(const std::vector<benchdnn_dnnl_wrapper_t<dnnl_primitive_t>> &v_prim,
     }
 
     TIME_FILL(SAFE(
-            init_ref_memory_args(ref_mem_map, mem_map, prim, prb, res), WARN));
+            init_ref_memory_args(ref_mem_map, mem_map, v_prim[0], prb, res),
+            WARN));
 
     args_t args(mem_map), ref_args(ref_mem_map);
 
-    SAFE(run_execution(prim, args, res), WARN);
+    SAFE(run_execution(v_prim[0], args, res), WARN);
 
-    check_correctness(prb, get_kinds_to_check(prb), args, ref_args, setup_cmp,
-            res, prb->dir);
-    SAFE(check_bitwise(prim, get_kinds_to_check(prb), args, prb->attr,
+    check_correctness(prb, get_kinds_to_check(prb, FLAG_FWD), args, ref_args,
+            setup_cmp, res, FLAG_FWD);
+    SAFE(check_bitwise(prim, get_kinds_to_check(prb, FLAG_FWD), args, prb->attr,
                  prb->inplace, res),
             WARN);
+
+    if (prb->dir & FLAG_BWD) {
+        // Extend memory map with backward args.
+        init_memory_args<prb_t>(
+                mem_map, prb, v_prim[1], supported_exec_args(FLAG_BWD));
+
+        // Re-add scale (pruned by init_memory_args since SCALE is not in
+        // exec_bwd_args; init_ref_memory_args will fill the value).
+        {
+            auto scale_md = dnn_mem_t::init_host_scalar_md(dnnl_f32);
+            mem_map.emplace(DNNL_ARG_SCALE, dnn_mem_t(scale_md));
+        }
+
+        TIME_FILL(SAFE(init_ref_memory_args(
+                                ref_mem_map, mem_map, v_prim[1], prb, res),
+                WARN));
+
+        args = args_t(mem_map);
+        ref_args = args_t(ref_mem_map);
+
+        SAFE(run_execution(v_prim[1], args, res), WARN);
+
+        check_correctness(prb, get_kinds_to_check(prb, FLAG_BWD), args,
+                ref_args, setup_cmp, res, FLAG_BWD);
+        SAFE(check_bitwise(prim, get_kinds_to_check(prb, FLAG_BWD), args,
+                     prb->attr, prb->inplace, res),
+                WARN);
+    }
 
     return measure_perf(prb->ctx_exe, res, prim, args);
 }
