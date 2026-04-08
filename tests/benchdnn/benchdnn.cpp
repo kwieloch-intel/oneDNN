@@ -99,8 +99,6 @@ int main(int argc, char **argv) {
     for (; argc > 0; --argc, ++argv)
         if (!parse_bench_settings(argv[0])) break;
 
-    finalize_bench_mode();
-
     if (!strcmp("--self", argv[0])) {
         self::bench(--argc, ++argv);
     } else if (!strcmp("--conv", argv[0])) {
