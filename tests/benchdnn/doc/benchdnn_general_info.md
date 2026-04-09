@@ -96,8 +96,6 @@ otherwise. The following modes (`--mode`) are supported:
   enabled to align data filling with the Fast Performance mode.
 * Fast Performance (`F`): This flow executes Performance mode with `P` and `M`
   modifiers (see below) enabled and updated maximum measuring time per case.
-* Correctness & performance (`CP`). This mode is not supported. Use `--mode=C`
-  and `--mode=P` (or `--mode=F`) separately.
 
 ## Mode modifiers
 

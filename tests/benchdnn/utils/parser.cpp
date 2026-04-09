@@ -1617,7 +1617,6 @@ static bool parse_mode(
               "    * `P` for performance testing.\n"
               "    * `F` for fast performance testing (GPU only).\n"
               "    * `B` for bitwise (numerical determinism) testing.\n"
-              "    * `CP` for both correctness and performance testing.\n"
               "    More details at "
             + doc_url + "benchdnn_general_info.md\n";
 
