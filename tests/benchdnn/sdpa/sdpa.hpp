@@ -58,6 +58,7 @@ struct settings_t : public base_settings_t {
     std::vector<std::vector<dnnl_data_type_t>> dt {{dnnl_f32}};
     std::vector<std::string> qtag {tag::abx}, ktag {tag::abx}, vtag {tag::abx},
             dtag {tag::abx};
+    std::vector<dnnl_data_type_t> mdt {dnnl_f32};
     std::vector<mask_type_t> mask_type {MASK_NONE};
     std::vector<scale_type_t> scale_type {SCALE_NONE};
     std::vector<dnnl_dim_t> kv_head_number {0};
@@ -72,7 +73,8 @@ struct settings_t : public base_settings_t {
     bool has_single_setup() const override {
         return dir.size() == 1 && dt.size() == 1 && qtag.size() == 1
                 && ktag.size() == 1 && vtag.size() == 1 && dtag.size() == 1
-                && mask_type.size() == 1 && scale_type.size() == 1
+                && mdt.size() == 1 && mask_type.size() == 1
+                && scale_type.size() == 1
                 && kv_head_number.size() == 1
                 && base_settings_t::has_single_setup();
     }
@@ -82,7 +84,8 @@ struct prb_t : public prb_vdims_t {
     // A ctor with common interface across all drivers.
     prb_t(const settings_t &s)
         : prb_t(s.prb_vdims, s.dir[0], s.dt[0], s.qtag[0], s.ktag[0],
-                  s.vtag[0], s.dtag[0], s.mask_type[0], s.scale_type[0],
+                  s.vtag[0], s.dtag[0], s.mdt[0], s.mask_type[0],
+                  s.scale_type[0],
                   s.kv_head_number[0], s.attributes.front(), s.ctx_init[0],
                   s.ctx_exe[0], s.impl_filter) {
         SAFE_V(s.has_single_setup() ? OK : FAIL);
@@ -92,7 +95,8 @@ struct prb_t : public prb_vdims_t {
             const std::vector<dnnl_data_type_t> &dt,
             const std::string &qtag, const std::string &ktag,
             const std::string &vtag, const std::string &dtag,
-            mask_type_t mask_type, scale_type_t scale_type,
+            dnnl_data_type_t mdt, mask_type_t mask_type,
+            scale_type_t scale_type,
             dnnl_dim_t kv_head_number, const attr_t &attr,
             const thr_ctx_t &ctx_init, const thr_ctx_t &ctx_exe,
             const impl_filter_t &impl_filter)
@@ -103,6 +107,7 @@ struct prb_t : public prb_vdims_t {
         , ktag(ktag)
         , vtag(vtag)
         , dtag(dtag)
+        , mdt(mdt)
         , mask_type(mask_type)
         , scale_type(scale_type)
         , kv_head_number(kv_head_number)
@@ -157,6 +162,7 @@ struct prb_t : public prb_vdims_t {
     dir_t dir;
     std::vector<dnnl_data_type_t> dt;
     std::string qtag, ktag, vtag, dtag;
+    dnnl_data_type_t mdt;
     mask_type_t mask_type;
     scale_type_t scale_type;
     dnnl_dim_t kv_head_number;

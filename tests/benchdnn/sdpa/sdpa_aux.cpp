@@ -84,7 +84,7 @@ benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> prb_t::get_md(int arg) const {
         case DNNL_ARG_SHIFT: // Attention mask
             if (with_mask())
                 return dnn_mem_t::init_md(
-                        ndims, msk_dims.data(), dnnl_f32, tag::abx);
+                        ndims, msk_dims.data(), mdt, tag::abx);
             return dnn_mem_t::init_md();
         case DNNL_ARG_DIFF_SRC_0: // diff_Q
             return dnn_mem_t::init_md(ndims, q_dims().data(), q_dt(), qtag);
@@ -121,6 +121,7 @@ std::string prb_t::set_repro_line() {
     if (canonical || dtag != def.dtag[0]) s << "--dtag=" << dtag << " ";
     if (canonical || mask_type != def.mask_type[0])
         s << "--mask_type=" << mask_type2str(mask_type) << " ";
+    if (canonical || mdt != def.mdt[0]) s << "--mdt=" << mdt << " ";
     if (canonical || scale_type != def.scale_type[0])
         s << "--scale_type=" << scale_type2str(scale_type) << " ";
     if (canonical || kv_head_number != def.kv_head_number[0])

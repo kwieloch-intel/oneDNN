@@ -35,6 +35,7 @@ void check_correctness(
     for_(const auto &i_ktag : s.ktag)
     for_(const auto &i_vtag : s.vtag)
     for_(const auto &i_dtag : s.dtag)
+    for_(const auto &i_mdt : s.mdt)
     for_(const auto &i_mask_type : s.mask_type)
     for_(const auto &i_scale_type : s.scale_type)
     for_(const auto &i_kv_head_number : s.kv_head_number)
@@ -42,7 +43,7 @@ void check_correctness(
     for_(const auto &i_ctx_init : s.ctx_init)
     for (const auto &i_ctx_exe : s.ctx_exe) {
         const prb_t prb(s.prb_vdims, i_dir, i_dt, i_qtag, i_ktag, i_vtag,
-                i_dtag, i_mask_type, i_scale_type, i_kv_head_number, i_attr,
+                i_dtag, i_mdt, i_mask_type, i_scale_type, i_kv_head_number, i_attr,
                 i_ctx_init, i_ctx_exe, s.impl_filter);
         if (s.pattern && !match_regex(prb.str(), s.pattern)) return;
 
@@ -107,6 +108,7 @@ int bench(int argc, char **argv) {
                 || parse_tag(s.ktag, def.ktag, argv[0], "ktag")
                 || parse_tag(s.vtag, def.vtag, argv[0], "vtag")
                 || parse_tag(s.dtag, def.dtag, argv[0], "dtag")
+                || parse_dt(s.mdt, def.mdt, argv[0], "mdt")
                 || parse_vector_option(s.mask_type, def.mask_type,
                         str2mask_type, argv[0], "mask_type", help_mask_type)
                 || parse_vector_option(s.scale_type, def.scale_type,

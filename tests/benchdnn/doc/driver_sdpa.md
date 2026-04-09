@@ -26,9 +26,13 @@ where *sdpa-knobs* are:
             Refer to [tags](knobs_tag.md) for details.
  - `--mask_type={none [default], buffer, causal_top_left, causal_bottom_right}`
             -- specifies the attention mask type.
-            `none` uses no mask, `buffer` provides an explicit mask tensor,
-            `causal_top_left` and `causal_bottom_right` apply a causal mask
-            aligned to the respective corner.
+            `none` uses no mask, `buffer` provides an explicit mask tensor
+            of shape `[B, H, S_q, S_kv]` (added element-wise to attention
+            scores before softmax), `causal_top_left` and
+            `causal_bottom_right` apply a causal mask aligned to the
+            respective corner.
+ - `--mdt={f32 [default], f16, bf16}` -- data type of the attention mask
+            buffer. Only used when `--mask_type=buffer`.
  - `--scale_type={none [default], mul, div}` -- specifies how the attention
             scores are scaled. `none` uses the default `1/sqrt(head_size)`,
             `mul` multiplies scores by the scale value, `div` divides by it.
