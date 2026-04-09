@@ -56,7 +56,7 @@ dnnl_status_t init_pd(init_pd_args_t<prb_t> &init_pd_args) {
     // Attention mask (optional).
     benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> mask_d {};
     if (prb->with_mask()) {
-        mask_d = create_md(prb->ndims, prb->msk_dims, dnnl_f32, tag::abx);
+        mask_d = create_md(prb->ndims, prb->msk_dims, prb->mdt, tag::abx);
     }
 
     // Always pass a valid md — the API unconditionally dereferences it.
