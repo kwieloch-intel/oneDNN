@@ -1622,26 +1622,9 @@ static bool parse_mode(
 
     const auto str2bench_mode = [](const std::string &_str) {
         bench_mode_t mode = default_bench_mode;
-        if (_str.size() > 2) {
+        if (_str.size() > 1) {
             BENCHDNN_PRINT(
                     0, "%s\n%s", "Error: mode value is invalid.", help.c_str());
-            SAFE_V(FAIL);
-        } else if (_str.size() == 2) {
-            for (size_t i = 0; i < _str.size(); i++) {
-                switch (_str[i]) {
-                    case 'c':
-                    case 'C':
-                    case 'p':
-                    case 'P': break;
-                    default:
-                        BENCHDNN_PRINT(0, "%s\n%s",
-                                "Error: mode value is invalid.", help.c_str());
-                        SAFE_V(FAIL);
-                }
-            }
-            BENCHDNN_PRINT(0, "%s\n",
-                    "Error: --mode=CP is not supported. Use --mode=C and "
-                    "--mode=P (or --mode=F) separately.");
             SAFE_V(FAIL);
         } else if (_str.size() == 1) {
             switch (_str[0]) {
