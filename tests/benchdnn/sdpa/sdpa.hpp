@@ -27,8 +27,8 @@
 #include "utils/perf_report.hpp"
 #include "utils/settings.hpp"
 
-// Internal test interface for SDPA primitive.
-#include "tests/gtests/internals/sdpa_internal.hpp"
+// C API for SDPA primitive creation (forward and backward overloads).
+#include "common/sdpa_test_iface.hpp"
 
 namespace sdpa {
 
