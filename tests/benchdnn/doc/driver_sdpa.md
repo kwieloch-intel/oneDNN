@@ -1,5 +1,8 @@
 # SDPA Driver
 
+**Note:** This driver tests internal SDPA primitive functionality that is not
+part of the public oneDNN API.
+
 ## Usage
 ``` sh
     ./benchdnn --sdpa [benchdnn-knobs] [sdpa-knobs] [sdpa-desc] ...
