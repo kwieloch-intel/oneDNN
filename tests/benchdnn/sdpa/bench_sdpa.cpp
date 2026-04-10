@@ -38,12 +38,11 @@ void check_correctness(
     for_(const auto &i_mdt : s.mdt)
     for_(const auto &i_mask_type : s.mask_type)
     for_(const auto &i_scale_type : s.scale_type)
-    for_(const auto &i_kv_head_number : s.kv_head_number)
     for_(const auto &i_attr : s.attributes)
     for_(const auto &i_ctx_init : s.ctx_init)
     for (const auto &i_ctx_exe : s.ctx_exe) {
         const prb_t prb(s.prb_vdims, i_dir, i_dt, i_qtag, i_ktag, i_vtag,
-                i_dtag, i_mdt, i_mask_type, i_scale_type, i_kv_head_number, i_attr,
+                i_dtag, i_mdt, i_mask_type, i_scale_type, i_attr,
                 i_ctx_init, i_ctx_exe, s.impl_filter);
         if (s.pattern && !match_regex(prb.str(), s.pattern)) return;
 
@@ -88,11 +87,6 @@ static const std::string help_scale_type
           "1/sqrt(head_size),\n    `mul` - multiply by scale, `div` - divide "
           "by scale.\n";
 
-static const std::string help_kv_head_number
-        = "INT    (Default: `0`)\n    Specifies the number of KV heads for "
-          "GQA/MQA.\n    `0` means standard MHA (same number of KV and Q "
-          "heads).\n";
-
 int bench(int argc, char **argv) {
     driver_name = "sdpa";
     using namespace parser;
@@ -113,8 +107,6 @@ int bench(int argc, char **argv) {
                         str2mask_type, argv[0], "mask_type", help_mask_type)
                 || parse_vector_option(s.scale_type, def.scale_type,
                         str2scale_type, argv[0], "scale_type", help_scale_type)
-                || parse_vector_option(s.kv_head_number, def.kv_head_number,
-                        atoi, argv[0], "kv_head_number", help_kv_head_number)
                 || parse_driver_shared_settings(s, def, argv[0]);
         if (!parsed_options) {
             catch_unknown_options(argv[0]);

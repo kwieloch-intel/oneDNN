@@ -128,8 +128,6 @@ std::string prb_t::set_repro_line() {
     if (canonical || mdt != def.mdt[0]) s << "--mdt=" << mdt << " ";
     if (canonical || scale_type != def.scale_type[0])
         s << "--scale_type=" << scale_type2str(scale_type) << " ";
-    if (canonical || kv_head_number != def.kv_head_number[0])
-        s << "--kv_head_number=" << kv_head_number << " ";
 
     s << attr;
     if (canonical || ctx_init != def.ctx_init[0])
