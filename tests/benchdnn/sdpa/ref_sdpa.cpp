@@ -34,7 +34,7 @@ namespace sdpa {
 // Reference SDPA: generates gold data by composing existing oneDNN primitives
 // (matmul, softmax) instead of reimplementing the algorithm from scratch.
 //
-// Pipeline: score = matmul(Q, K)  ->  scale  ->  [mask]  ->  [causal]
+// Pipeline: score = matmul(Q, K)  ->  scale  ->  [mask/causal]
 //           ->  softmax(score)  ->  matmul(prob, V)  ->  DST
 //
 // All intermediate computation is done in f32 on the CPU engine.
@@ -179,17 +179,41 @@ static void compute_fwd(const prb_t *prb, dnnl_engine_t eng,
             sp[i] *= sv;
     }
 
-    // Step 3: Add attention mask buffer (with broadcasting support).
-    // Broadcast dims (size == 1) get stride 0, collapsing the index to 0.
-    if (prb->with_mask()) {
+    // Step 3: Apply attention mask (buffer or causal).
+    // For causal masks, generate a [1, SQ, SK] buffer with 0/-inf, then
+    // apply it through the same broadcast-add path as explicit buffers.
+    if (prb->with_mask() || prb->with_causal_mask()) {
         float *sp = static_cast<float *>(score);
-        const float *mp = static_cast<float *>(args.find(DNNL_ARG_SHIFT));
-        int64_t msk_mb = 1;
-        for (int i = 0; i < prb->ndims - 2; i++)
-            msk_mb *= prb->msk_dims[i];
-        const int64_t msk_sq = prb->msk_dims[prb->ndims - 2];
+
+        dnn_mem_t causal_buf;
+        if (prb->with_causal_mask()) {
+            causal_buf = make_3d(eng, 1, SQ, SK);
+            float *cp = static_cast<float *>(causal_buf);
+            for (int64_t q = 0; q < SQ; q++)
+                for (int64_t k = 0; k < SK; k++) {
+                    const bool masked
+                            = (prb->mask_type == MASK_CAUSAL_TOP_LEFT)
+                            ? (k > q)
+                            : (k > q + (SK - SQ));
+                    cp[q * SK + k] = masked
+                            ? -std::numeric_limits<float>::infinity()
+                            : 0.0f;
+                }
+        }
+
+        const float *mp = prb->with_mask()
+                ? static_cast<float *>(args.find(DNNL_ARG_SHIFT))
+                : static_cast<float *>(causal_buf);
+
+        int64_t msk_mb = 1, msk_sq = SQ;
+        if (prb->with_mask()) {
+            for (int i = 0; i < prb->ndims - 2; i++)
+                msk_mb *= prb->msk_dims[i];
+            msk_sq = prb->msk_dims[prb->ndims - 2];
+        }
         const int64_t ms_mb = (msk_mb > 1) ? msk_sq * SK : 0;
         const int64_t ms_sq = (msk_sq > 1) ? SK : 0;
+
         for (int64_t mb = 0; mb < MB; mb++)
             for (int64_t sq = 0; sq < SQ; sq++)
                 for (int64_t sk = 0; sk < SK; sk++)
@@ -197,22 +221,7 @@ static void compute_fwd(const prb_t *prb, dnnl_engine_t eng,
                             += mp[mb * ms_mb + sq * ms_sq + sk];
     }
 
-    // Step 4: Apply causal mask (set future positions to -inf).
-    if (prb->with_causal_mask()) {
-        float *sp = static_cast<float *>(score);
-        for (int64_t b = 0; b < MB; b++)
-            for (int64_t q = 0; q < SQ; q++)
-                for (int64_t k = 0; k < SK; k++) {
-                    const bool masked = (prb->mask_type == MASK_CAUSAL_TOP_LEFT)
-                            ? (k > q)
-                            : (k > q + (SK - SQ));
-                    if (masked)
-                        sp[(b * SQ + q) * SK + k]
-                                = -std::numeric_limits<float>::infinity();
-                }
-    }
-
-    // Step 5: Softmax over K dimension (axis = 2 of the 3-D score tensor).
+    // Step 4: Softmax over K dimension (axis = 2 of the 3-D score tensor).
     // Copy to score2 and run softmax in-place there to preserve score if
     // needed.
     score2 = make_3d(eng, MB, SQ, SK);
@@ -220,7 +229,7 @@ static void compute_fwd(const prb_t *prb, dnnl_engine_t eng,
             MB * SQ * SK * sizeof(float));
     exec_softmax(eng, strm, score2, /* axis = */ 2);
 
-    // Step 5b: Dropout (optional). score2_dp starts as a copy of score2;
+    // Step 4b: Dropout (optional). score2_dp starts as a copy of score2;
     // when dropout is configured, dropped elements are zeroed and the rest
     // scaled by 1/(1-p).  score2 keeps the clean probs for backward.
     const int64_t score_n = MB * SQ * SK;
@@ -235,7 +244,7 @@ static void compute_fwd(const prb_t *prb, dnnl_engine_t eng,
             maybe_dropout(prb->attr, sp[i], i, dropout_mask);
     }
 
-    // Step 6 (optional): output = prob_dp x V  (matmul primitive).
+    // Step 5 (optional): output = prob_dp x V  (matmul primitive).
     if (out) {
         *out = make_3d(eng, MB, SQ, V);
         exec_matmul(eng, strm, score2_dp, v_ref, *out);
