@@ -24,15 +24,19 @@ where *sdpa-knobs* are:
             Refer to [tags](knobs_tag.md) for details.
  - `--dtag={abx [default], ...}` -- memory format of the destination tensor.
             Refer to [tags](knobs_tag.md) for details.
- - `--mask_type={none [default], buffer, causal_top_left, causal_bottom_right}`
+ - `--mask_type={none [default], buffer, buffer_1d, buffer_2d, causal_top_left, causal_bottom_right}`
             -- specifies the attention mask type.
             `none` uses no mask, `buffer` provides an explicit mask tensor
             of shape `[B, H, S_q, S_kv]` (added element-wise to attention
-            scores before softmax), `causal_top_left` and
-            `causal_bottom_right` apply a causal mask aligned to the
-            respective corner.
+            scores before softmax), `buffer_1d` provides a broadcast mask of
+            shape `[1, 1, 1, S_kv]` (same mask for all batches, heads, and
+            queries), `buffer_2d` provides a broadcast mask of shape
+            `[1, 1, S_q, S_kv]` (same mask for all batches and heads),
+            `causal_top_left` and `causal_bottom_right` apply a causal mask
+            aligned to the respective corner.
  - `--mdt={f32 [default], f16, bf16}` -- data type of the attention mask
-            buffer. Only used when `--mask_type=buffer`.
+            buffer. Only used when `--mask_type` is one of `buffer`,
+            `buffer_1d`, or `buffer_2d`.
  - `--scale_type={none [default], mul, div}` -- specifies how the scale value
             is passed to the primitive. Attention scores are always scaled; the
             knob controls the API path used. `none` passes `1/sqrt(head_size)`

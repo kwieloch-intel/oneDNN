@@ -62,7 +62,20 @@ dnnl_status_t init_pd(init_pd_args_t<prb_t> &init_pd_args) {
     // Always pass a valid md — the API unconditionally dereferences it.
     auto scale_d = dnn_mem_t::init_host_scalar_md(dnnl_f32);
 
-    int attn_mask_type_val = static_cast<int>(prb->mask_type);
+    // Map benchdnn mask_type_t to API's dnnl_attn_mask_type_t values.
+    // All buffer variants (full, 1D, 2D) use dnnl_attn_mask_buffer (1).
+    int attn_mask_type_val = [](mask_type_t mt) {
+        switch (mt) {
+            case MASK_NONE: return 0; // dnnl_attn_mask_undef
+            case MASK_BUFFER:
+            case MASK_BUFFER_1D:
+            case MASK_BUFFER_2D: return 1; // dnnl_attn_mask_buffer
+            case MASK_CAUSAL_TOP_LEFT: return 2; // dnnl_attn_mask_top_left
+            case MASK_CAUSAL_BOTTOM_RIGHT:
+                return 3; // dnnl_attn_mask_bottom_right
+            default: return 0;
+        }
+    }(prb->mask_type);
     dnnl_alg_kind_t softmax_alg = dnnl_softmax_accurate;
 
     // 0 means standard MHA — pass actual KV head count to avoid div-by-zero.

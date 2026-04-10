@@ -179,12 +179,24 @@ static void compute_fwd(const prb_t *prb, dnnl_engine_t eng,
             sp[i] *= sv;
     }
 
-    // Step 3: Add attention mask buffer.
+    // Step 3: Add attention mask buffer (with broadcasting support).
     if (prb->with_mask()) {
         float *sp = static_cast<float *>(score);
         const float *mp = static_cast<float *>(args.find(DNNL_ARG_SHIFT));
-        for (int64_t i = 0, n = MB * SQ * SK; i < n; i++)
-            sp[i] += mp[i];
+        int64_t msk_mb = 1;
+        for (int i = 0; i < prb->ndims - 2; i++)
+            msk_mb *= prb->msk_dims[i];
+        const int64_t msk_sq = prb->msk_dims[prb->ndims - 2];
+        for (int64_t mb = 0; mb < MB; mb++) {
+            const int64_t m_mb = (msk_mb > 1) ? mb : 0;
+            for (int64_t sq = 0; sq < SQ; sq++) {
+                const int64_t m_sq = (msk_sq > 1) ? sq : 0;
+                for (int64_t sk = 0; sk < SK; sk++) {
+                    sp[(mb * SQ + sq) * SK + sk]
+                            += mp[(m_mb * msk_sq + m_sq) * SK + sk];
+                }
+            }
+        }
     }
 
     // Step 4: Apply causal mask (set future positions to -inf).
