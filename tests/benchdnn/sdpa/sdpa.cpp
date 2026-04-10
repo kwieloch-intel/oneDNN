@@ -78,9 +78,8 @@ dnnl_status_t init_pd(init_pd_args_t<prb_t> &init_pd_args) {
     }(prb->mask_type);
     dnnl_alg_kind_t softmax_alg = dnnl_softmax_accurate;
 
-    // 0 means standard MHA — pass actual KV head count to avoid div-by-zero.
-    dnnl_dim_t kv_hn = prb->kv_head_number;
-    if (kv_hn == 0) kv_hn = prb->k_dims()[1];
+    // KV head count is always derived from the K tensor's head dimension.
+    dnnl_dim_t kv_hn = prb->k_dims()[prb->ndims - 3];
 
     // Default to invert_scale=false; scale is filled in init_ref_memory_args.
     bool invert = prb->with_scale() ? prb->invert_scale() : false;

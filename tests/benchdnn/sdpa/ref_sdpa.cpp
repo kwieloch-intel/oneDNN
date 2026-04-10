@@ -262,9 +262,7 @@ void compute_ref(
 
     // GQA/MQA: K/V may have fewer heads than Q.
     const int64_t q_heads = (nd >= 3) ? prb->q_dims()[nd - 3] : 1;
-    const int64_t kv_heads = (nd >= 3 && prb->kv_head_number > 0)
-            ? prb->kv_head_number
-            : q_heads;
+    const int64_t kv_heads = (nd >= 3) ? prb->k_dims()[nd - 3] : q_heads;
     const int64_t outer_batch = MB / q_heads;
     const bool is_gqa = (kv_heads != q_heads);
 

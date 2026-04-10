@@ -44,9 +44,6 @@ where *sdpa-knobs* are:
             explicitly via the `invert_scale=false` API path, `div` passes
             `sqrt(head_size)` via the `invert_scale=true` API path. All three
             produce the same mathematical result `scores / sqrt(head_size)`.
- - `--kv_head_number={0 [default], INT}` -- number of KV heads for grouped
-            query attention (GQA) or multi-query attention (MQA). `0` means
-            standard multi-head attention where KV heads equal Q heads.
  - `--match=REGEX` -- skip problems not matching the regular expression in
             `REGEX`. By default no pattern is applied (run everything).
             Note: Windows may interpret only string arguments surrounded by
