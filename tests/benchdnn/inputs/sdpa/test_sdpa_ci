@@ -5,30 +5,30 @@
 
 # Buffer mask (bf16 excluded: GPU kernel bug)
 --reset
---mask_type=buffer
+--mask=buffer
 --dt=f32,f16
 --batch=shapes_basic
 
 # Broadcast buffer masks (1D and 2D, matching gtest oneD/twoD)
 --reset
---mask_type=buffer_1d
+--mask=buffer_1d
 --dt=f16
 --batch=shapes_basic
 
 --reset
---mask_type=buffer_2d
+--mask=buffer_2d
 --dt=f16
 --batch=shapes_basic
 
 # Causal mask
 --reset
---mask_type=causal_top_left
+--mask=causal_top_left
 --dt=f32,f16
 --batch=shapes_basic
 
 # Scale
 --reset
---scale_type=mul
+--scale=mul
 --dt=f32,f16
 --batch=shapes_basic
 
@@ -48,6 +48,6 @@
 --dir=BWD_D
 --dt=f16,bf16
 --batch=shapes_bwd
---mask_type=causal_top_left
+--mask=causal_top_left
 --dt=f16
 --batch=shapes_bwd
