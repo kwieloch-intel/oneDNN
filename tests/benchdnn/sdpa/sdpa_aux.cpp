@@ -27,6 +27,8 @@ namespace sdpa {
 mask_type_t str2mask_type(const char *str) {
     if (!strcmp(str, "none")) return MASK_NONE;
     if (!strcmp(str, "buffer")) return MASK_BUFFER;
+    if (!strcmp(str, "buffer_1d")) return MASK_BUFFER_1D;
+    if (!strcmp(str, "buffer_2d")) return MASK_BUFFER_2D;
     if (!strcmp(str, "causal_top_left")) return MASK_CAUSAL_TOP_LEFT;
     if (!strcmp(str, "causal_bottom_right")) return MASK_CAUSAL_BOTTOM_RIGHT;
     assert(!"unknown mask type");
@@ -37,6 +39,8 @@ const char *mask_type2str(mask_type_t mt) {
     switch (mt) {
         case MASK_NONE: return "none";
         case MASK_BUFFER: return "buffer";
+        case MASK_BUFFER_1D: return "buffer_1d";
+        case MASK_BUFFER_2D: return "buffer_2d";
         case MASK_CAUSAL_TOP_LEFT: return "causal_top_left";
         case MASK_CAUSAL_BOTTOM_RIGHT: return "causal_bottom_right";
         default: assert(!"unknown mask type"); return "unknown";

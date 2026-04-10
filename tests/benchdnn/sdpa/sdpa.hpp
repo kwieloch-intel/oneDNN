@@ -35,8 +35,10 @@ namespace sdpa {
 enum mask_type_t {
     MASK_NONE = 0,
     MASK_BUFFER = 1,
-    MASK_CAUSAL_TOP_LEFT = 2,
-    MASK_CAUSAL_BOTTOM_RIGHT = 3,
+    MASK_BUFFER_1D = 2,
+    MASK_BUFFER_2D = 3,
+    MASK_CAUSAL_TOP_LEFT = 4,
+    MASK_CAUSAL_BOTTOM_RIGHT = 5,
 };
 mask_type_t str2mask_type(const char *str);
 const char *mask_type2str(mask_type_t mt);
@@ -145,8 +147,18 @@ struct prb_t : public prb_vdims_t {
         score_dims[ndims - 2] = n_queries;
         score_dims[ndims - 1] = n_keys;
 
-        // Compute mask dims if needed (same as score_dims).
-        if (with_mask()) { msk_dims = score_dims; }
+        // Compute mask dims based on mask_type and broadcasting.
+        if (with_mask()) {
+            msk_dims.resize(ndims);
+            // batch dims: 1 for all broadcast variants.
+            for (int i = 0; i < ndims - 2; i++)
+                msk_dims[i] = (mask_type == MASK_BUFFER) ? qdims[i] : 1;
+            // S_q: 1 for 1D, full for 2D and buffer.
+            msk_dims[ndims - 2]
+                    = (mask_type == MASK_BUFFER_1D) ? 1 : n_queries;
+            // S_kv: always full.
+            msk_dims[ndims - 1] = n_keys;
+        }
 
         mb = 1;
         for (int i = 0; i < ndims - 2; i++)
@@ -181,7 +193,10 @@ struct prb_t : public prb_vdims_t {
     const dims_t &k_dims() const { return vdims[1]; }
     const dims_t &v_dims() const { return vdims[2]; }
 
-    bool with_mask() const { return mask_type == MASK_BUFFER; }
+    bool with_mask() const {
+        return mask_type == MASK_BUFFER || mask_type == MASK_BUFFER_1D
+                || mask_type == MASK_BUFFER_2D;
+    }
     bool with_causal_mask() const {
         return mask_type == MASK_CAUSAL_TOP_LEFT
                 || mask_type == MASK_CAUSAL_BOTTOM_RIGHT;
