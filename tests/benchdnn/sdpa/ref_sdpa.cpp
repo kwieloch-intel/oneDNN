@@ -180,6 +180,7 @@ static void compute_fwd(const prb_t *prb, dnnl_engine_t eng,
     }
 
     // Step 3: Add attention mask buffer (with broadcasting support).
+    // Broadcast dims (size == 1) get stride 0, collapsing the index to 0.
     if (prb->with_mask()) {
         float *sp = static_cast<float *>(score);
         const float *mp = static_cast<float *>(args.find(DNNL_ARG_SHIFT));
@@ -187,16 +188,13 @@ static void compute_fwd(const prb_t *prb, dnnl_engine_t eng,
         for (int i = 0; i < prb->ndims - 2; i++)
             msk_mb *= prb->msk_dims[i];
         const int64_t msk_sq = prb->msk_dims[prb->ndims - 2];
-        for (int64_t mb = 0; mb < MB; mb++) {
-            const int64_t m_mb = (msk_mb > 1) ? mb : 0;
-            for (int64_t sq = 0; sq < SQ; sq++) {
-                const int64_t m_sq = (msk_sq > 1) ? sq : 0;
-                for (int64_t sk = 0; sk < SK; sk++) {
+        const int64_t ms_mb = (msk_mb > 1) ? msk_sq * SK : 0;
+        const int64_t ms_sq = (msk_sq > 1) ? SK : 0;
+        for (int64_t mb = 0; mb < MB; mb++)
+            for (int64_t sq = 0; sq < SQ; sq++)
+                for (int64_t sk = 0; sk < SK; sk++)
                     sp[(mb * SQ + sq) * SK + sk]
-                            += mp[(m_mb * msk_sq + m_sq) * SK + sk];
-                }
-            }
-        }
+                            += mp[mb * ms_mb + sq * ms_sq + sk];
     }
 
     // Step 4: Apply causal mask (set future positions to -inf).
