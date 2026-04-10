@@ -32,7 +32,7 @@
 --dt=f32,f16
 --batch=shapes_basic
 
-# Transformer shapes (GPU-safe, no seq_q=1)
+# Transformer-derived shapes (cf. tests/gtests/internals/test_sdpa.cpp)
 --reset
 --dt=f16,bf16
 --batch=shapes_transformer_gpu

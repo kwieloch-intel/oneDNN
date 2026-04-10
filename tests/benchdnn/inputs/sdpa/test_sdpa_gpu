@@ -43,7 +43,7 @@
 --dt=f32,f16
 --batch=shapes_basic
 
-# Transformer shapes
+# Transformer-derived shapes (cf. tests/gtests/internals/test_sdpa.cpp)
 --reset
 --dt=f16,bf16
 --batch=shapes_transformer_gpu
