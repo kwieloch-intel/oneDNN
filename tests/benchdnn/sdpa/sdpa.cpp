@@ -249,26 +249,25 @@ void setup_cmp(compare::compare_t &cmp, const prb_t *prb, data_kind_t kind,
 }
 
 std::vector<int> supported_exec_args(dir_t dir) {
-    // SRC_0=Q, SRC_1=K, SRC_2=V, SHIFT=attn_mask. SCALE is added in doit().
     static const std::vector<int> exec_fwd_args = {
-            DNNL_ARG_SRC_0,
-            DNNL_ARG_SRC_1,
-            DNNL_ARG_SRC_2,
+            DNNL_ARG_QUERIES,
+            DNNL_ARG_KEYS,
+            DNNL_ARG_VALUES,
             DNNL_ARG_DST,
-            DNNL_ARG_SHIFT,
+            DNNL_ARG_ATTN_MASK,
             DNNL_ARG_WORKSPACE,
     };
     static const std::vector<int> exec_bwd_args = {
-            DNNL_ARG_SRC_0,
-            DNNL_ARG_SRC_1,
-            DNNL_ARG_SRC_2,
+            DNNL_ARG_QUERIES,
+            DNNL_ARG_KEYS,
+            DNNL_ARG_VALUES,
             DNNL_ARG_DST,
-            DNNL_ARG_SHIFT,
-            DNNL_ARG_DIFF_SRC_0,
-            DNNL_ARG_DIFF_SRC_1,
-            DNNL_ARG_DIFF_SRC_2,
+            DNNL_ARG_ATTN_MASK,
+            DNNL_ARG_DIFF_QUERIES,
+            DNNL_ARG_DIFF_KEYS,
+            DNNL_ARG_DIFF_VALUES,
             DNNL_ARG_DIFF_DST,
-            DNNL_ARG_DIFF_SRC_3, // DS
+            DNNL_ARG_DS,
             DNNL_ARG_WORKSPACE,
     };
     return (dir & FLAG_FWD) ? exec_fwd_args : exec_bwd_args;
@@ -320,17 +319,17 @@ int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
         auto &ref_mem = ref_mem_map[exec_arg];
 
         switch (exec_arg) {
-            case DNNL_ARG_SRC_0:
+            case DNNL_ARG_QUERIES:
                 SAFE(fill_data(exec_arg, SRC, prb, cfg, mem, ref_mem, res),
                         WARN);
                 break;
-            case DNNL_ARG_SRC_1:
-            case DNNL_ARG_SRC_2:
+            case DNNL_ARG_KEYS:
+            case DNNL_ARG_VALUES:
                 SAFE(fill_data(exec_arg, WEI, prb, cfg, mem, ref_mem, res),
                         WARN);
                 break;
             case DNNL_ARG_DST: break;
-            case DNNL_ARG_SHIFT:
+            case DNNL_ARG_ATTN_MASK:
                 SAFE(fill_data(exec_arg, SRC, prb, cfg, mem, ref_mem, res),
                         WARN);
                 break;
@@ -338,10 +337,10 @@ int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
                 SAFE(fill_data(exec_arg, DST, prb, cfg, mem, ref_mem, res),
                         WARN);
                 break;
-            case DNNL_ARG_DIFF_SRC_0: // diff_Q — output, not filled.
-            case DNNL_ARG_DIFF_SRC_1: // diff_K — output, not filled.
-            case DNNL_ARG_DIFF_SRC_2: // diff_V — output, not filled.
-            case DNNL_ARG_DIFF_SRC_3: // dS — output, not filled.
+            case DNNL_ARG_DIFF_QUERIES:
+            case DNNL_ARG_DIFF_KEYS:
+            case DNNL_ARG_DIFF_VALUES:
+            case DNNL_ARG_DS:
                 break;
             default:
                 SAFE(init_ref_memory_args_default_case(

@@ -77,28 +77,28 @@ dnnl_data_type_t prb_t::get_dt(data_kind_t data_kind) const {
 
 benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> prb_t::get_md(int arg) const {
     switch (arg) {
-        case DNNL_ARG_SRC_0: // Queries
+        case DNNL_ARG_QUERIES:
             return dnn_mem_t::init_md(ndims, q_dims().data(), q_dt(), qtag);
-        case DNNL_ARG_SRC_1: // Keys
+        case DNNL_ARG_KEYS:
             return dnn_mem_t::init_md(ndims, k_dims().data(), k_dt(), ktag);
-        case DNNL_ARG_SRC_2: // Values
+        case DNNL_ARG_VALUES:
             return dnn_mem_t::init_md(ndims, v_dims().data(), v_dt(), vtag);
         case DNNL_ARG_DST:
             return dnn_mem_t::init_md(ndims, dst_dims.data(), dst_dt(), dtag);
-        case DNNL_ARG_SHIFT: // Attention mask
+        case DNNL_ARG_ATTN_MASK:
             if (with_mask())
                 return dnn_mem_t::init_md(
                         ndims, msk_dims.data(), mdt, tag::abx);
             return dnn_mem_t::init_md();
-        case DNNL_ARG_DIFF_SRC_0: // diff_Q
+        case DNNL_ARG_DIFF_QUERIES:
             return dnn_mem_t::init_md(ndims, q_dims().data(), q_dt(), qtag);
-        case DNNL_ARG_DIFF_SRC_1: // diff_K
+        case DNNL_ARG_DIFF_KEYS:
             return dnn_mem_t::init_md(ndims, k_dims().data(), k_dt(), ktag);
-        case DNNL_ARG_DIFF_SRC_2: // diff_V
+        case DNNL_ARG_DIFF_VALUES:
             return dnn_mem_t::init_md(ndims, v_dims().data(), v_dt(), vtag);
         case DNNL_ARG_DIFF_DST:
             return dnn_mem_t::init_md(ndims, dst_dims.data(), dst_dt(), dtag);
-        case DNNL_ARG_DIFF_SRC_3: // dS (score gradient)
+        case DNNL_ARG_DS:
             return dnn_mem_t::init_md(
                     ndims, score_dims.data(), dnnl_f32, tag::abx);
         default:
