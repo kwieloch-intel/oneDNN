@@ -48,16 +48,16 @@ const char *mask_type2str(mask_type_t mt) {
 }
 
 scale_type_t str2scale_type(const char *str) {
-    if (!strcmp(str, "none")) return SCALE_NONE;
+    if (!strcmp(str, "library")) return SCALE_LIBRARY;
     if (!strcmp(str, "mul")) return SCALE_MUL;
     if (!strcmp(str, "div")) return SCALE_DIV;
     assert(!"unknown scale type");
-    return SCALE_NONE;
+    return SCALE_LIBRARY;
 }
 
 const char *scale_type2str(scale_type_t st) {
     switch (st) {
-        case SCALE_NONE: return "none";
+        case SCALE_LIBRARY: return "library";
         case SCALE_MUL: return "mul";
         case SCALE_DIV: return "div";
         default: assert(!"unknown scale type"); return "unknown";

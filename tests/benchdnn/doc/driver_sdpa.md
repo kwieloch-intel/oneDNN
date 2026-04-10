@@ -37,13 +37,13 @@ where *sdpa-knobs* are:
  - `--mdt={f32 [default], f16, bf16}` -- data type of the attention mask
             buffer. Only used when `--mask_type` is one of `buffer`,
             `buffer_1d`, or `buffer_2d`.
- - `--scale_type={none [default], mul, div}` -- specifies how the scale value
-            is passed to the primitive. Attention scores are always scaled; the
-            knob controls the API path used. `none` passes `1/sqrt(head_size)`
-            as a multiplicative scale, `mul` does the same explicitly via the
-            `invert_scale=false` API path, `div` passes `sqrt(head_size)` via
-            the `invert_scale=true` API path. All three produce the same
-            mathematical result `scores / sqrt(head_size)`.
+ - `--scale_type={library [default], mul, div}` -- specifies how the scale
+            value is passed to the primitive. Attention scores are always
+            scaled; the knob controls the API path used. `library` passes
+            `1/sqrt(head_size)` as a multiplicative scale, `mul` does the same
+            explicitly via the `invert_scale=false` API path, `div` passes
+            `sqrt(head_size)` via the `invert_scale=true` API path. All three
+            produce the same mathematical result `scores / sqrt(head_size)`.
  - `--kv_head_number={0 [default], INT}` -- number of KV heads for grouped
             query attention (GQA) or multi-query attention (MQA). `0` means
             standard multi-head attention where KV heads equal Q heads.

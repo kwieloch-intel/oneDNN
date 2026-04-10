@@ -44,7 +44,7 @@ mask_type_t str2mask_type(const char *str);
 const char *mask_type2str(mask_type_t mt);
 
 enum scale_type_t {
-    SCALE_NONE = 0,
+    SCALE_LIBRARY = 0,
     SCALE_MUL = 1,
     SCALE_DIV = 2,
 };
@@ -62,7 +62,7 @@ struct settings_t : public base_settings_t {
             dtag {tag::abx};
     std::vector<dnnl_data_type_t> mdt {dnnl_f32};
     std::vector<mask_type_t> mask_type {MASK_NONE};
-    std::vector<scale_type_t> scale_type {SCALE_NONE};
+    std::vector<scale_type_t> scale_type {SCALE_LIBRARY};
     std::vector<dnnl_dim_t> kv_head_number {0};
 
     const char *perf_template_csv() const {
@@ -201,7 +201,7 @@ struct prb_t : public prb_vdims_t {
         return mask_type == MASK_CAUSAL_TOP_LEFT
                 || mask_type == MASK_CAUSAL_BOTTOM_RIGHT;
     }
-    bool with_scale() const { return scale_type != SCALE_NONE; }
+    bool with_scale() const { return scale_type != SCALE_LIBRARY; }
     bool invert_scale() const { return scale_type == SCALE_DIV; }
 
     dnnl_data_type_t q_dt() const { return dt[0]; }

@@ -83,9 +83,9 @@ static const std::string help_mask_type
           "    `causal_bottom_right` - causal mask from bottom-right.\n";
 
 static const std::string help_scale_type
-        = "SCALE_TYPE    (Default: `none`)\n    Specifies the attention scale "
-          "type for SDPA.\n    `none` - no explicit scale (uses default "
-          "1/sqrt(head_size)),\n    `mul` - multiply by scale, `div` - divide "
+        = "SCALE_TYPE    (Default: `library`)\n    Specifies the attention "
+          "scale type for SDPA.\n    `library` - library computes "
+          "1/sqrt(head_size),\n    `mul` - multiply by scale, `div` - divide "
           "by scale.\n";
 
 static const std::string help_kv_head_number
