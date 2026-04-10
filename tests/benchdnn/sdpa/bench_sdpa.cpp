@@ -75,13 +75,13 @@ int verify_input(const settings_t &s) {
     return OK;
 }
 
-static const std::string help_mask_type
+static const char *help_mask_type
         = "MASK_TYPE    (Default: `none`)\n    Specifies the attention mask "
           "type for SDPA.\n    `none` - no mask, `buffer` - explicit mask "
           "buffer, `causal_top_left` - causal mask from top-left,\n"
           "    `causal_bottom_right` - causal mask from bottom-right.\n";
 
-static const std::string help_scale_type
+static const char *help_scale_type
         = "SCALE_TYPE    (Default: `library`)\n    Specifies the attention "
           "scale type for SDPA.\n    `library` - library computes "
           "1/sqrt(head_size),\n    `mul` - multiply by scale, `div` - divide "
