@@ -30,6 +30,20 @@
 // C API for SDPA primitive creation (forward and backward overloads).
 #include "common/sdpa_test_iface.hpp"
 
+// Semantic argument aliases for SDPA tensors.
+// Mirrors the macros in src/common/sdpa_types.hpp without pulling in internal
+// dependencies (op_desc_t, etc.) that benchdnn cannot resolve.
+#ifndef DNNL_ARG_QUERIES
+#define DNNL_ARG_QUERIES DNNL_ARG_SRC_0
+#define DNNL_ARG_KEYS DNNL_ARG_SRC_1
+#define DNNL_ARG_VALUES DNNL_ARG_SRC_2
+#define DNNL_ARG_ATTN_MASK DNNL_ARG_SHIFT
+#define DNNL_ARG_DIFF_QUERIES DNNL_ARG_DIFF_SRC_0
+#define DNNL_ARG_DIFF_KEYS DNNL_ARG_DIFF_SRC_1
+#define DNNL_ARG_DIFF_VALUES DNNL_ARG_DIFF_SRC_2
+#define DNNL_ARG_DS DNNL_ARG_DIFF_SRC_3
+#endif
+
 namespace sdpa {
 
 enum mask_type_t {

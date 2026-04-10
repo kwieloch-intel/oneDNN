@@ -202,7 +202,7 @@ static void compute_fwd(const prb_t *prb, dnnl_engine_t eng,
         }
 
         const float *mp = prb->with_mask()
-                ? static_cast<float *>(args.find(DNNL_ARG_SHIFT))
+                ? static_cast<float *>(args.find(DNNL_ARG_ATTN_MASK))
                 : static_cast<float *>(causal_buf);
 
         int64_t msk_mb = 1, msk_sq = SQ;
@@ -257,9 +257,9 @@ void compute_ref(
     dnnl_stream_t strm {};
     DNN_SAFE_V(dnnl_stream_create(&strm, eng, dnnl_stream_default_flags));
 
-    const dnn_mem_t &q_m = args.find(DNNL_ARG_SRC_0);
-    const dnn_mem_t &k_m = args.find(DNNL_ARG_SRC_1);
-    const dnn_mem_t &v_m = args.find(DNNL_ARG_SRC_2);
+    const dnn_mem_t &q_m = args.find(DNNL_ARG_QUERIES);
+    const dnn_mem_t &k_m = args.find(DNNL_ARG_KEYS);
+    const dnn_mem_t &v_m = args.find(DNNL_ARG_VALUES);
     const dnn_mem_t &dst_m = args.find(DNNL_ARG_DST);
 
     const int64_t MB = prb->mb; // product of all batch dims (incl. heads)
@@ -306,9 +306,9 @@ void compute_ref(
 
     if (dir & FLAG_BWD) {
         const dnn_mem_t &diff_dst_m = args.find(DNNL_ARG_DIFF_DST);
-        const dnn_mem_t &diff_q_m = args.find(DNNL_ARG_DIFF_SRC_0);
-        const dnn_mem_t &diff_k_m = args.find(DNNL_ARG_DIFF_SRC_1);
-        const dnn_mem_t &diff_v_m = args.find(DNNL_ARG_DIFF_SRC_2);
+        const dnn_mem_t &diff_q_m = args.find(DNNL_ARG_DIFF_QUERIES);
+        const dnn_mem_t &diff_k_m = args.find(DNNL_ARG_DIFF_KEYS);
+        const dnn_mem_t &diff_v_m = args.find(DNNL_ARG_DIFF_VALUES);
 
         // Recompute forward intermediates to get softmax probabilities.
         // score2 = pre-dropout probs (for softmax_bwd), score2_dp = post-
