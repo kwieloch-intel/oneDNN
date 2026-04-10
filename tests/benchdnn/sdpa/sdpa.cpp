@@ -14,6 +14,7 @@
 * limitations under the License.
 *******************************************************************************/
 
+#include <limits>
 #include <math.h>
 #include <random>
 #include <stdio.h>
@@ -187,6 +188,29 @@ int fill_data(int exec_arg, data_kind_t kind, const prb_t *prb,
     return OK;
 }
 
+// Fill attention mask with realistic 0 / -inf values (~25 % masked).
+int fill_mask(dnn_mem_t &mem_dt, dnn_mem_t &mem_fp) {
+    const auto nelems = mem_fp.nelems();
+    if (nelems == 0) return OK;
+
+    const float neg_inf = -std::numeric_limits<float>::infinity();
+    const int64_t chunk_size = 64;
+    const int64_t n_chunks = div_up(nelems, chunk_size);
+
+    benchdnn_parallel_nd(n_chunks, [&](int64_t idx_chunk) {
+        int64_t idx_start = idx_chunk * chunk_size;
+        int64_t idx_end = MIN2(idx_start + chunk_size, nelems);
+        std::minstd_rand rng(nelems + idx_start + 1);
+        rng.discard(1);
+
+        for (int64_t idx = idx_start; idx < idx_end; ++idx)
+            mem_fp.set_f32_elem(idx, (rng() % 4 == 0) ? neg_inf : 0.f);
+    });
+
+    SAFE(mem_dt.reorder(mem_fp), WARN);
+    return OK;
+}
+
 void skip_unimplemented_prb(const prb_t *prb, res_t *res) {
     skip_unimplemented_data_type(
             {prb->q_dt(), prb->k_dt(), prb->v_dt(), prb->dst_dt()}, prb->dir,
@@ -330,8 +354,7 @@ int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
                 break;
             case DNNL_ARG_DST: break;
             case DNNL_ARG_ATTN_MASK:
-                SAFE(fill_data(exec_arg, SRC, prb, cfg, mem, ref_mem, res),
-                        WARN);
+                SAFE(fill_mask(mem, ref_mem), WARN);
                 break;
             case DNNL_ARG_DIFF_DST:
                 SAFE(fill_data(exec_arg, DST, prb, cfg, mem, ref_mem, res),
