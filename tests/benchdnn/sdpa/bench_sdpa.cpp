@@ -75,14 +75,16 @@ int verify_input(const settings_t &s) {
     return OK;
 }
 
-static const char *help_mask_type
-        = "MASK_TYPE    (Default: `none`)\n    Specifies the attention mask "
+static const char *help_mask
+        = "MASK    (Default: `none`)\n    Specifies the attention mask "
           "type for SDPA.\n    `none` - no mask, `buffer` - explicit mask "
-          "buffer, `causal_top_left` - causal mask from top-left,\n"
+          "buffer, `buffer_1d` - broadcast [1,1,1,S_kv],\n"
+          "    `buffer_2d` - broadcast [1,1,S_q,S_kv],\n"
+          "    `causal_top_left` - causal mask from top-left,\n"
           "    `causal_bottom_right` - causal mask from bottom-right.\n";
 
-static const char *help_scale_type
-        = "SCALE_TYPE    (Default: `library`)\n    Specifies the attention "
+static const char *help_scale
+        = "SCALE    (Default: `library`)\n    Specifies the attention "
           "scale type for SDPA.\n    `library` - library computes "
           "1/sqrt(head_size),\n    `mul` - multiply by scale, `div` - divide "
           "by scale.\n";
@@ -104,9 +106,9 @@ int bench(int argc, char **argv) {
                 || parse_tag(s.dtag, def.dtag, argv[0], "dtag")
                 || parse_dt(s.mdt, def.mdt, argv[0], "mdt")
                 || parse_vector_option(s.mask_type, def.mask_type,
-                        str2mask_type, argv[0], "mask_type", help_mask_type)
+                        str2mask_type, argv[0], "mask", help_mask)
                 || parse_vector_option(s.scale_type, def.scale_type,
-                        str2scale_type, argv[0], "scale_type", help_scale_type)
+                        str2scale_type, argv[0], "scale", help_scale)
                 || parse_driver_shared_settings(s, def, argv[0]);
         if (!parsed_options) {
             catch_unknown_options(argv[0]);

@@ -27,7 +27,7 @@ where *sdpa-knobs* are:
             Refer to [tags](knobs_tag.md) for details.
  - `--dtag={abx [default], ...}` -- memory format of the destination tensor.
             Refer to [tags](knobs_tag.md) for details.
- - `--mask_type={none [default], buffer, buffer_1d, buffer_2d, causal_top_left, causal_bottom_right}`
+ - `--mask={none [default], buffer, buffer_1d, buffer_2d, causal_top_left, causal_bottom_right}`
             -- specifies the attention mask type.
             `none` uses no mask, `buffer` provides an explicit mask tensor
             of shape `[B, H, S_q, S_kv]` (added element-wise to attention
@@ -38,9 +38,9 @@ where *sdpa-knobs* are:
             `causal_top_left` and `causal_bottom_right` apply a causal mask
             aligned to the respective corner.
  - `--mdt={f32 [default], f16, bf16}` -- data type of the attention mask
-            buffer. Only used when `--mask_type` is one of `buffer`,
+            buffer. Only used when `--mask` is one of `buffer`,
             `buffer_1d`, or `buffer_2d`.
- - `--scale_type={library [default], mul, div}` -- specifies how the scale
+ - `--scale={library [default], mul, div}` -- specifies how the scale
             value is passed to the primitive. Attention scores are always
             scaled; the knob controls the API path used. `library` passes
             `1/sqrt(head_size)` as a multiplicative scale, `mul` does the same
@@ -87,20 +87,20 @@ Run the default validation set of SDPA using `inputs/sdpa/shapes_basic` file:
 
 Run f16 SDPA with a causal mask on a transformer-like shape:
 ``` sh
-    ./benchdnn --sdpa --dt=f16 --mask_type=causal_top_left \
+    ./benchdnn --sdpa --dt=f16 --mask=causal_top_left \
                1x12x128x64:1x12x64x128:1x12x128x64
 ```
 
 Run SDPA with explicit scale (division mode) and mixed data types:
 ``` sh
-    ./benchdnn --sdpa --dt=f16:f16:f16:f32 --scale_type=div \
+    ./benchdnn --sdpa --dt=f16:f16:f16:f32 --scale=div \
                2x8x32x64:2x8x64x32:2x8x32x64
 ```
 
 Run SDPA performance benchmark on GPU:
 ``` sh
     ./benchdnn --mode=f --sdpa --engine=gpu --dt=f16 \
-               --mask_type=causal_bottom_right \
+               --mask=causal_bottom_right \
                1x32x2048x128:1x32x128x2048:1x32x2048x128
 ```
 

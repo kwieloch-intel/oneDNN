@@ -124,10 +124,10 @@ std::string prb_t::set_repro_line() {
     if (canonical || vtag != def.vtag[0]) s << "--vtag=" << vtag << " ";
     if (canonical || dtag != def.dtag[0]) s << "--dtag=" << dtag << " ";
     if (canonical || mask_type != def.mask_type[0])
-        s << "--mask_type=" << mask_type2str(mask_type) << " ";
+        s << "--mask=" << mask_type2str(mask_type) << " ";
     if (canonical || mdt != def.mdt[0]) s << "--mdt=" << mdt << " ";
     if (canonical || scale_type != def.scale_type[0])
-        s << "--scale_type=" << scale_type2str(scale_type) << " ";
+        s << "--scale=" << scale_type2str(scale_type) << " ";
 
     s << attr;
     if (canonical || ctx_init != def.ctx_init[0])
