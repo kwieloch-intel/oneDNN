@@ -133,9 +133,8 @@ void reduce_kv_heads(const dnn_mem_t &src, const dnn_mem_t &dst,
 }
 
 // Transpose last two dims of a 3D f32 memory: [d0, d1, d2] → [d0, d2, d1].
-dnn_mem_t transpose_2d(
-        dnnl_engine_t eng, const dnn_mem_t &src, int64_t d0, int64_t d1,
-        int64_t d2) {
+dnn_mem_t transpose_2d(dnnl_engine_t eng, const dnn_mem_t &src, int64_t d0,
+        int64_t d1, int64_t d2) {
     auto dst = make_3d(eng, d0, d2, d1);
     const float *s = static_cast<float *>(src);
     float *d = static_cast<float *>(dst);
@@ -153,10 +152,10 @@ dnn_mem_t transpose_2d(
 // Returns `score2` = softmax probs (pre-dropout, for backward softmax_bwd)
 // and `score2_dp` = post-dropout probs (for BMM2 and backward dV).
 // When dropout is not configured, score2_dp == score2.
-static void compute_fwd(const prb_t *prb, dnnl_engine_t eng,
-        dnnl_stream_t strm, const dnn_mem_t &q_ref, const dnn_mem_t &k_ref,
-        const dnn_mem_t &v_ref, const args_t &args, dnn_mem_t &score2,
-        dnn_mem_t &score2_dp, dnn_mem_t *out) {
+static void compute_fwd(const prb_t *prb, dnnl_engine_t eng, dnnl_stream_t strm,
+        const dnn_mem_t &q_ref, const dnn_mem_t &k_ref, const dnn_mem_t &v_ref,
+        const args_t &args, dnn_mem_t &score2, dnn_mem_t &score2_dp,
+        dnn_mem_t *out) {
     const int64_t MB = prb->mb;
     const int64_t SQ = prb->n_queries;
     const int64_t SK = prb->n_keys;
@@ -191,8 +190,7 @@ static void compute_fwd(const prb_t *prb, dnnl_engine_t eng,
             float *cp = static_cast<float *>(causal_buf);
             for (int64_t q = 0; q < SQ; q++)
                 for (int64_t k = 0; k < SK; k++) {
-                    const bool masked
-                            = (prb->mask_type == MASK_CAUSAL_TOP_LEFT)
+                    const bool masked = (prb->mask_type == MASK_CAUSAL_TOP_LEFT)
                             ? (k > q)
                             : (k > q + (SK - SQ));
                     cp[q * SK + k] = masked
@@ -234,12 +232,11 @@ static void compute_fwd(const prb_t *prb, dnnl_engine_t eng,
     // scaled by 1/(1-p).  score2 keeps the clean probs for backward.
     const int64_t score_n = MB * SQ * SK;
     score2_dp = make_3d(eng, MB, SQ, SK);
-    std::memcpy(static_cast<float *>(score2_dp),
-            static_cast<float *>(score2), score_n * sizeof(float));
+    std::memcpy(static_cast<float *>(score2_dp), static_cast<float *>(score2),
+            score_n * sizeof(float));
     if (!prb->attr.dropout.is_def()) {
         float *sp = static_cast<float *>(score2_dp);
-        const dnn_mem_t &dropout_mask
-                = args.find(DNNL_ARG_ATTR_DROPOUT_MASK);
+        const dnn_mem_t &dropout_mask = args.find(DNNL_ARG_ATTR_DROPOUT_MASK);
         for (int64_t i = 0; i < score_n; i++)
             maybe_dropout(prb->attr, sp[i], i, dropout_mask);
     }
@@ -321,8 +318,7 @@ void compute_ref(
 
         // dO in 3-D layout [MB, SQ, V].
         auto dO = make_3d(eng, MB, SQ, V);
-        std::memcpy(static_cast<float *>(dO),
-                static_cast<float *>(diff_dst_m),
+        std::memcpy(static_cast<float *>(dO), static_cast<float *>(diff_dst_m),
                 MB * SQ * V * sizeof(float));
 
         // B1: dS2 = dO × V^T  →  [MB, SQ, SK]
@@ -400,21 +396,19 @@ void compute_ref(
         exec_matmul(eng, strm, q_t, dS, dK_full);
 
         // Copy/reduce results into output memories.
-        std::memcpy(static_cast<float *>(diff_q_m),
-                static_cast<float *>(dQ), MB * SQ * H * sizeof(float));
+        std::memcpy(static_cast<float *>(diff_q_m), static_cast<float *>(dQ),
+                MB * SQ * H * sizeof(float));
 
         if (!is_gqa) {
             std::memcpy(static_cast<float *>(diff_k_m),
-                    static_cast<float *>(dK_full),
-                    MB * H * SK * sizeof(float));
+                    static_cast<float *>(dK_full), MB * H * SK * sizeof(float));
             std::memcpy(static_cast<float *>(diff_v_m),
-                    static_cast<float *>(dV_full),
-                    MB * SK * V * sizeof(float));
+                    static_cast<float *>(dV_full), MB * SK * V * sizeof(float));
         } else {
-            reduce_kv_heads(dK_full, diff_k_m, outer_batch, q_heads, kv_heads,
-                    H * SK);
-            reduce_kv_heads(dV_full, diff_v_m, outer_batch, q_heads, kv_heads,
-                    SK * V);
+            reduce_kv_heads(
+                    dK_full, diff_k_m, outer_batch, q_heads, kv_heads, H * SK);
+            reduce_kv_heads(
+                    dV_full, diff_v_m, outer_batch, q_heads, kv_heads, SK * V);
         }
     }
 }

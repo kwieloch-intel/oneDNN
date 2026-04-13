@@ -97,20 +97,18 @@ struct settings_t : public base_settings_t {
 struct prb_t : public prb_vdims_t {
     // A ctor with common interface across all drivers.
     prb_t(const settings_t &s)
-        : prb_t(s.prb_vdims, s.dir[0], s.dt[0], s.qtag[0], s.ktag[0],
-                  s.vtag[0], s.dtag[0], s.mdt[0], s.mask_type[0],
-                  s.scale_type[0],
-                  s.attributes.front(), s.ctx_init[0],
-                  s.ctx_exe[0], s.impl_filter) {
+        : prb_t(s.prb_vdims, s.dir[0], s.dt[0], s.qtag[0], s.ktag[0], s.vtag[0],
+                  s.dtag[0], s.mdt[0], s.mask_type[0], s.scale_type[0],
+                  s.attributes.front(), s.ctx_init[0], s.ctx_exe[0],
+                  s.impl_filter) {
         SAFE_V(s.has_single_setup() ? OK : FAIL);
     }
 
     prb_t(const prb_vdims_t &prb_vdims, dir_t dir,
-            const std::vector<dnnl_data_type_t> &dt,
-            const std::string &qtag, const std::string &ktag,
-            const std::string &vtag, const std::string &dtag,
-            dnnl_data_type_t mdt, mask_type_t mask_type,
-            scale_type_t scale_type, const attr_t &attr,
+            const std::vector<dnnl_data_type_t> &dt, const std::string &qtag,
+            const std::string &ktag, const std::string &vtag,
+            const std::string &dtag, dnnl_data_type_t mdt,
+            mask_type_t mask_type, scale_type_t scale_type, const attr_t &attr,
             const thr_ctx_t &ctx_init, const thr_ctx_t &ctx_exe,
             const impl_filter_t &impl_filter)
         : prb_vdims_t(prb_vdims)
@@ -164,8 +162,7 @@ struct prb_t : public prb_vdims_t {
             for (int i = 0; i < ndims - 2; i++)
                 msk_dims[i] = (mask_type == MASK_BUFFER) ? qdims[i] : 1;
             // S_q: 1 for 1D, full for 2D and buffer.
-            msk_dims[ndims - 2]
-                    = (mask_type == MASK_BUFFER_1D) ? 1 : n_queries;
+            msk_dims[ndims - 2] = (mask_type == MASK_BUFFER_1D) ? 1 : n_queries;
             // S_kv: always full.
             msk_dims[ndims - 1] = n_keys;
         }

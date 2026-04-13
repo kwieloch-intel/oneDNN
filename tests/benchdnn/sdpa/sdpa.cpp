@@ -103,14 +103,13 @@ dnnl_status_t init_pd(init_pd_args_t<prb_t> &init_pd_args) {
 
         TIME_C_PD(DNN_SAFE_STATUS(sdpa_primitive_desc_create(&init_pd_args.pd,
                 init_pd_args.engine, q_d, k_d, v_d, dst_d, mask_ptr, scale_d,
-                invert, kv_hn, attn_mask_type_val, softmax_alg, prop,
-                dnnl_attr, /* kq_attr = */ nullptr,
+                invert, kv_hn, attn_mask_type_val, softmax_alg, prop, dnnl_attr,
+                /* kq_attr = */ nullptr,
                 /* vs_attr = */ nullptr)));
     } else {
         auto diff_q_d = create_md(prb->ndims, prb->q_dims(), q_dt, prb->qtag);
         auto diff_k_d = create_md(prb->ndims, prb->k_dims(), k_dt, prb->ktag);
-        auto diff_v_d
-                = create_md(prb->ndims, prb->v_dims(), v_dt, prb->vtag);
+        auto diff_v_d = create_md(prb->ndims, prb->v_dims(), v_dt, prb->vtag);
         auto diff_dst_d
                 = create_md(prb->ndims, prb->dst_dims, dst_dt, prb->dtag);
 
@@ -353,9 +352,7 @@ int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
                         WARN);
                 break;
             case DNNL_ARG_DST: break;
-            case DNNL_ARG_ATTN_MASK:
-                SAFE(fill_mask(mem, ref_mem), WARN);
-                break;
+            case DNNL_ARG_ATTN_MASK: SAFE(fill_mask(mem, ref_mem), WARN); break;
             case DNNL_ARG_DIFF_DST:
                 SAFE(fill_data(exec_arg, DST, prb, cfg, mem, ref_mem, res),
                         WARN);
@@ -363,8 +360,7 @@ int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
             case DNNL_ARG_DIFF_QUERIES:
             case DNNL_ARG_DIFF_KEYS:
             case DNNL_ARG_DIFF_VALUES:
-            case DNNL_ARG_DS:
-                break;
+            case DNNL_ARG_DS: break;
             default:
                 SAFE(init_ref_memory_args_default_case(
                              exec_arg, mem, ref_mem, prb->attr, res),
@@ -461,8 +457,8 @@ int doit(const std::vector<benchdnn_dnnl_wrapper_t<dnnl_primitive_t>> &v_prim,
             mem_map.emplace(DNNL_ARG_SCALE, dnn_mem_t(scale_md));
         }
 
-        TIME_FILL(SAFE(init_ref_memory_args(
-                                ref_mem_map, mem_map, v_prim[1], prb, res),
+        TIME_FILL(SAFE(
+                init_ref_memory_args(ref_mem_map, mem_map, v_prim[1], prb, res),
                 WARN));
 
         args = args_t(mem_map);
