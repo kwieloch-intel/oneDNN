@@ -85,6 +85,37 @@ void exec_softmax(
     DNN_SAFE_V(dnnl_stream_wait(strm));
 }
 
+// Execute softmax backward on CPU: diff_src = softmax_bwd(fwd_dst, diff_dst).
+void exec_softmax_bwd(dnnl_engine_t eng, dnnl_stream_t strm,
+        const dnn_mem_t &fwd_dst, const dnn_mem_t &diff_dst,
+        dnn_mem_t &diff_src, int axis) {
+    const auto alg = static_cast<dnnl_alg_kind_t>(
+            dnnl::impl::alg_kind::softmax_accurate_inf_as_zero);
+    dnnl_primitive_desc_t fwd_pd {};
+    DNN_SAFE_V(dnnl_softmax_forward_primitive_desc_create(&fwd_pd, eng,
+            dnnl_forward_training, alg, fwd_dst.md_, fwd_dst.md_, axis,
+            nullptr));
+    auto fwd_pd_w = make_benchdnn_dnnl_wrapper(fwd_pd);
+
+    dnnl_primitive_desc_t bwd_pd {};
+    DNN_SAFE_V(dnnl_softmax_backward_primitive_desc_create(&bwd_pd, eng,
+            dnnl_softmax_accurate, diff_src.md_, diff_dst.md_, fwd_dst.md_,
+            axis, fwd_pd, nullptr));
+    auto bwd_pd_w = make_benchdnn_dnnl_wrapper(bwd_pd);
+
+    dnnl_primitive_t prim {};
+    DNN_SAFE_V(dnnl_primitive_create(&prim, bwd_pd));
+    auto prim_w = make_benchdnn_dnnl_wrapper(prim);
+
+    dnnl_exec_arg_t args[] = {
+            {DNNL_ARG_DST, fwd_dst.m_},
+            {DNNL_ARG_DIFF_DST, diff_dst.m_},
+            {DNNL_ARG_DIFF_SRC, diff_src.m_},
+    };
+    DNN_SAFE_V(dnnl_primitive_execute(prim, strm, 3, args));
+    DNN_SAFE_V(dnnl_stream_wait(strm));
+}
+
 // Create a 3-D f32 plain memory on `eng`.
 dnn_mem_t make_3d(dnnl_engine_t eng, int64_t d0, int64_t d1, int64_t d2) {
     dnnl_dims_t dims = {d0, d1, d2};
@@ -147,6 +178,20 @@ dnn_mem_t transpose_2d(dnnl_engine_t eng, const dnn_mem_t &src, int64_t d0,
 
 } // anonymous namespace
 
+// Scale all elements of `mem` by 1/sqrt(head_size), or by the user-provided
+// scale value when --scale=mul or --scale=div is configured.
+static void scale_scores(
+        const prb_t *prb, const args_t &args, dnn_mem_t &mem, int64_t n) {
+    float sv = 1.0f / std::sqrt(static_cast<float>(prb->head_size));
+    if (prb->with_scale()) {
+        float s = args.find(DNNL_ARG_SCALE).get_f32_elem(0);
+        sv = prb->invert_scale() ? 1.0f / s : s;
+    }
+    float *p = static_cast<float *>(mem);
+    for (int64_t i = 0; i < n; i++)
+        p[i] *= sv;
+}
+
 // Shared forward computation: computes score, applies scale/mask/causal,
 // softmax, optional dropout, and optionally the final matmul.
 // Returns `score2` = softmax probs (pre-dropout, for backward softmax_bwd)
@@ -159,7 +204,6 @@ static void compute_fwd(const prb_t *prb, dnnl_engine_t eng, dnnl_stream_t strm,
     const int64_t MB = prb->mb;
     const int64_t SQ = prb->n_queries;
     const int64_t SK = prb->n_keys;
-    const int64_t H = prb->head_size;
     const int64_t V = prb->n_values;
 
     // Step 1: score = Q x K  (matmul primitive).
@@ -167,16 +211,7 @@ static void compute_fwd(const prb_t *prb, dnnl_engine_t eng, dnnl_stream_t strm,
     exec_matmul(eng, strm, q_ref, k_ref, score);
 
     // Step 2: Scale.
-    {
-        float sv = 1.0f / std::sqrt(static_cast<float>(H));
-        if (prb->with_scale()) {
-            float s = args.find(DNNL_ARG_SCALE).get_f32_elem(0);
-            sv = prb->invert_scale() ? 1.0f / s : s;
-        }
-        float *sp = static_cast<float *>(score);
-        for (int64_t i = 0, n = MB * SQ * SK; i < n; i++)
-            sp[i] *= sv;
-    }
+    scale_scores(prb, args, score, MB * SQ * SK);
 
     // Step 3: Apply attention mask (buffer or causal).
     // For causal masks, generate a [1, SQ, SK] buffer with 0/-inf, then
@@ -343,46 +378,10 @@ void compute_ref(
         // B3: softmax backward — dS = softmax_bwd(S2, dS2)
         // Uses pre-dropout probs (score2) as the forward DST.
         auto dS = make_3d(eng, MB, SQ, SK);
-        {
-            // Create forward pd as hint for backward.
-            const auto alg = static_cast<dnnl_alg_kind_t>(
-                    dnnl::impl::alg_kind::softmax_accurate_inf_as_zero);
-            dnnl_primitive_desc_t fwd_pd {};
-            DNN_SAFE_V(dnnl_softmax_forward_primitive_desc_create(&fwd_pd, eng,
-                    dnnl_forward_training, alg, score2.md_, score2.md_,
-                    /* axis = */ 2, nullptr));
-            auto fwd_pd_w = make_benchdnn_dnnl_wrapper(fwd_pd);
-
-            dnnl_primitive_desc_t bwd_pd {};
-            DNN_SAFE_V(dnnl_softmax_backward_primitive_desc_create(&bwd_pd, eng,
-                    dnnl_softmax_accurate, dS.md_, dS2.md_, score2.md_,
-                    /* axis = */ 2, fwd_pd, nullptr));
-            auto bwd_pd_w = make_benchdnn_dnnl_wrapper(bwd_pd);
-
-            dnnl_primitive_t bwd_prim {};
-            DNN_SAFE_V(dnnl_primitive_create(&bwd_prim, bwd_pd));
-            auto bwd_prim_w = make_benchdnn_dnnl_wrapper(bwd_prim);
-
-            dnnl_exec_arg_t bwd_args[] = {
-                    {DNNL_ARG_DST, score2.m_},
-                    {DNNL_ARG_DIFF_DST, dS2.m_},
-                    {DNNL_ARG_DIFF_SRC, dS.m_},
-            };
-            DNN_SAFE_V(dnnl_primitive_execute(bwd_prim, strm, 3, bwd_args));
-            DNN_SAFE_V(dnnl_stream_wait(strm));
-        }
+        exec_softmax_bwd(eng, strm, score2, dS2, dS, /* axis = */ 2);
 
         // B4: Scale dS.
-        {
-            float sv = 1.0f / std::sqrt(static_cast<float>(H));
-            if (prb->with_scale()) {
-                float s = args.find(DNNL_ARG_SCALE).get_f32_elem(0);
-                sv = prb->invert_scale() ? 1.0f / s : s;
-            }
-            float *dsp = static_cast<float *>(dS);
-            for (int64_t i = 0, n = MB * SQ * SK; i < n; i++)
-                dsp[i] *= sv;
-        }
+        scale_scores(prb, args, dS, MB * SQ * SK);
 
         // B5: dQ = dS × K^T  →  [MB, SQ, H]
         // K is [MB, H, SK], K^T is [MB, SK, H].
