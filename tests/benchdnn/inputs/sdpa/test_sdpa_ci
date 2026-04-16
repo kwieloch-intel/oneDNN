@@ -3,7 +3,7 @@
 --dt=f32,f16,bf16
 --batch=shapes_basic
 
-# Buffer mask (bf16 excluded: GPU kernel bug)
+# Buffer mask (bf16 excluded: GPU kernel limitation)
 --reset
 --mask=buffer
 --dt=f32,f16

@@ -220,8 +220,8 @@ static void compute_fwd(const prb_t *prb, dnnl_engine_t eng, dnnl_stream_t strm,
     }
 
     // Step 4: Softmax over K dimension (axis = 2 of the 3-D score tensor).
-    // Copy to score2 and run softmax in-place there to preserve score if
-    // needed.
+    // Copy to score2 and run softmax in-place there; the pre-softmax score
+    // is not used further.
     score2 = make_3d(eng, MB, SQ, SK);
     std::memcpy(static_cast<float *>(score2), static_cast<float *>(score),
             MB * SQ * SK * sizeof(float));
