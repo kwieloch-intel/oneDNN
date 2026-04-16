@@ -113,8 +113,8 @@ dnnl_status_t init_pd(init_pd_args_t<prb_t> &init_pd_args) {
         auto diff_dst_d
                 = create_md(prb->ndims, prb->dst_dims, dst_dt, prb->dtag);
 
-        // Follow the .cpp / C++ wrapper parameter order (mask/scale
-        // before diff descs) which differs from the .hpp declaration.
+        // Follow the implementation parameter order (mask/scale before
+        // diff descs) which differs from the .hpp declaration.
         TIME_C_PD(DNN_SAFE_STATUS(sdpa_primitive_desc_create(&init_pd_args.pd,
                 init_pd_args.engine, q_d, k_d, v_d, dst_d, mask_ptr, scale_d,
                 diff_q_d, diff_k_d, diff_v_d, diff_dst_d,
@@ -262,7 +262,7 @@ void setup_cmp(compare::compare_t &cmp, const prb_t *prb, data_kind_t kind,
     const float trh = trh_coeff * (1 + prb->n_keys) * epsilon_dt(prb->dst_dt());
     cmp.set_threshold(trh);
 
-    // bf16 backward produces element diffs up to ~3e-2 near-zero values.
+    // bf16 backward produces element diffs up to ~3e-2 for near-zero values.
     const float abs_trh = is_bwd ? 5e-2f : 2e-3f;
     cmp.set_driver_check_function(
             [abs_trh](const compare::compare_t::driver_check_func_args_t &a)

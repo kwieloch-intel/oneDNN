@@ -3,14 +3,14 @@
 --dt=f32,f16,bf16
 --batch=shapes_basic
 
-# Buffer mask (bf16 excluded: GPU kernel bug)
+# Buffer mask (bf16 excluded: GPU kernel limitation)
 --reset
 --mask=buffer
 --dt=f32,f16
 --batch=shapes_basic
 
 # Broadcast buffer masks (1D and 2D, matching gtest oneD/twoD)
-# bf16 excluded: same GPU kernel bug as full buffer above.
+# bf16 excluded: same GPU kernel limitation as full buffer above.
 --reset
 --mask=buffer_1d
 --dt=f16
