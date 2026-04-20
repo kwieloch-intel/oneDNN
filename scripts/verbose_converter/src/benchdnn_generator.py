@@ -883,6 +883,79 @@ class ZeroPadConverter(Converter):
         return f"--tag={maybe_make_any_tag(self.entry.mds[0])}"
 
 
+class SDPAConverter(Converter):
+    driver: str = "sdpa"
+
+    @property
+    def dir(self):
+        dirs = {
+            "forward_training": "FWD_D",
+            "forward_inference": "FWD_I",
+            "backward": "BWD_D",
+        }
+        d = dirs.get(self.entry.prop_kind, "")
+        return f"--dir={d}" if d else ""
+
+    @property
+    def aux(self):
+        parts = []
+        # Mask type
+        msk = self.entry.aux.get("msk")
+        if msk is not None:
+            mask_map = {
+                "1d": "buffer_1d",
+                "2d": "buffer_2d",
+                "causal:top_left": "causal_top_left",
+                "causal:bottom_right": "causal_bottom_right",
+            }
+            parts.append(f"--mask={mask_map.get(msk, 'buffer')}")
+
+        # Mask data type (from msk memory descriptor)
+        for md in self.entry.mds:
+            if md.arg == "msk":
+                parts.append(f"--mdt={md.data_type}")
+                break
+
+        # Scale type: scl:mul is the default (library mode), only emit
+        # --scale= for non-default values like "div".
+        scl = self.entry.aux.get("scl")
+        if scl is not None:
+            scale_mode = scl.split(":")[0]  # "mul" or "div"
+            if scale_mode != "mul":
+                parts.append(f"--scale={scale_mode}")
+
+        return " ".join(parts)
+
+    @property
+    def dts(self):
+        dt_map = {}
+        for md in self.entry.mds:
+            if md.arg in ("query", "key", "val", "dst"):
+                dt_map[md.arg] = md.data_type
+        q_dt = dt_map.get("query", "f32")
+        k_dt = dt_map.get("key", q_dt)
+        v_dt = dt_map.get("val", q_dt)
+        d_dt = dt_map.get("dst", q_dt)
+        if q_dt == k_dt == v_dt == d_dt:
+            return f"--dt={q_dt}"
+        return f"--dt={q_dt}:{k_dt}:{v_dt}:{d_dt}"
+
+    @property
+    def tags(self):
+        tag_names = [("query", "qtag"), ("key", "ktag"), ("val", "vtag"),
+                     ("dst", "dtag")]
+        tag_map = {}
+        for md in self.entry.mds:
+            if md.arg in ("query", "key", "val", "dst"):
+                tag_map[md.arg] = maybe_make_any_tag(md)
+        parts = []
+        for arg, flag in tag_names:
+            tag = tag_map.get(arg)
+            if tag:
+                parts.append(f"--{flag}={tag}")
+        return " ".join(parts)
+
+
 def get_converter(primitive: str) -> ConverterMeta:
     converters: Dict[str, ConverterMeta] = {
         "batch_normalization": BatchNormalizationConverter,
@@ -903,6 +976,7 @@ def get_converter(primitive: str) -> ConverterMeta:
         "reorder": ReorderConverter,
         "resampling": ResamplingConverter,
         "rnn": RNNConverter,
+        "sdpa": SDPAConverter,
         "shuffle": ShuffleConverter,
         "softmax": SoftmaxConverter,
         "sum": SumConverter,
