@@ -942,8 +942,12 @@ class SDPAConverter(Converter):
 
     @property
     def tags(self):
-        tag_names = [("query", "qtag"), ("key", "ktag"), ("val", "vtag"),
-                     ("dst", "dtag")]
+        tag_names = [
+            ("query", "qtag"),
+            ("key", "ktag"),
+            ("val", "vtag"),
+            ("dst", "dtag"),
+        ]
         tag_map = {}
         for md in self.entry.mds:
             if md.arg in ("query", "key", "val", "dst"):
