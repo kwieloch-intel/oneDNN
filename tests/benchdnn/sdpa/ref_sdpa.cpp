@@ -286,10 +286,7 @@ static void compute_fwd(const prb_t *prb, dnnl_engine_t eng, dnnl_stream_t strm,
 void compute_ref(
         const prb_t *prb, dir_t dir, const args_t &args, dnnl_primitive_t) {
     const auto &eng = get_cpu_engine();
-    dnnl_stream_t strm_raw {};
-    DNN_SAFE_V(dnnl_stream_create(&strm_raw, eng, dnnl_stream_default_flags));
-    auto strm_w = make_benchdnn_dnnl_wrapper(strm_raw);
-    dnnl_stream_t strm = strm_w;
+    stream_t strm(eng);
 
     const dnn_mem_t &q_m = args.find(DNNL_ARG_QUERIES);
     const dnn_mem_t &k_m = args.find(DNNL_ARG_KEYS);

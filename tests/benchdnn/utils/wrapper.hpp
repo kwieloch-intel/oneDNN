@@ -68,13 +68,6 @@ struct dnnl_api_traits<dnnl_memory_desc_t> {
     }
 };
 
-template <>
-struct dnnl_api_traits<dnnl_stream_t> {
-    static void destroy(dnnl_stream_t t) {
-        CHECK_DESTROY(dnnl_stream_destroy(t));
-    }
-};
-
 // Generic class providing RAII support for DNNL objects in benchdnn
 template <typename T>
 struct benchdnn_dnnl_wrapper_t {
