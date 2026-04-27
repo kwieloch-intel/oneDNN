@@ -171,8 +171,13 @@ struct prb_t : public prb_vdims_t {
         for (int i = 0; i < ndims - 2; i++)
             mb *= qdims[i];
 
-        ops = 2.0 * mb * n_queries * n_keys * head_size
+        // Forward: 2 matmuls (Q*K^T and prob*V).
+        // Backward: 5 matmuls (2.5x forward, cf. test_sdpa.cpp flash_flops).
+        // Causal masks halve the effective flop count.
+        double fwd_ops = 2.0 * mb * n_queries * n_keys * head_size
                 + 2.0 * mb * n_queries * n_values * n_keys;
+        if (with_causal_mask()) fwd_ops /= 2.0;
+        ops = (dir & FLAG_BWD) ? 2.5 * fwd_ops : fwd_ops;
 
         repro = set_repro_line(); // must be last in ctor to collect right info
     }
