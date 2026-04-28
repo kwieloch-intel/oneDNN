@@ -221,16 +221,18 @@ void skip_unimplemented_prb(const prb_t *prb, res_t *res) {
         res->reason = skip_reason::case_not_supported;
         return;
     }
-
-    // GPU implementation requires 4D tensors (batch x heads x seq x head_dim).
-    if (is_gpu() && prb->ndims < 4) {
-        res->state = SKIPPED;
-        res->reason = skip_reason::case_not_supported;
-        return;
-    }
 }
 
 void skip_invalid_prb(const prb_t *prb, res_t *res) {
+    // SDPA API requires 4D tensors (batch x heads x seq x head_dim).
+    // Guard must be here (not skip_unimplemented) because init_pd accesses
+    // ndims-3 which would be OOB for 2D/3D inputs.
+    if (prb->ndims < 4) {
+        res->state = SKIPPED;
+        res->reason = skip_reason::invalid_case;
+        return;
+    }
+
     // Validate dimension consistency.
     const auto &qdims = prb->q_dims();
     const auto &kdims = prb->k_dims();
