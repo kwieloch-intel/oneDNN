@@ -15,6 +15,7 @@
 *******************************************************************************/
 
 #include <cstring>
+#include <vector>
 
 #include "oneapi/dnnl/dnnl.h"
 
@@ -85,11 +86,65 @@ void exec_eltwise(dnnl_engine_t eng, dnnl_stream_t strm, dnn_mem_t &mem,
     DNN_SAFE_V(dnnl_stream_wait(strm));
 }
 
+// Execute in-place binary operation on CPU: lhs = lhs <alg> rhs.
+void exec_binary(dnnl_engine_t eng, dnnl_stream_t strm, dnn_mem_t &lhs,
+        const dnn_mem_t &rhs, dnnl_alg_kind_t alg) {
+    dnnl_primitive_desc_t pd {};
+    DNN_SAFE_V(dnnl_binary_primitive_desc_create(
+            &pd, eng, alg, lhs.md_, rhs.md_, lhs.md_, nullptr));
+    auto pd_w = make_benchdnn_dnnl_wrapper(pd);
+
+    dnnl_primitive_t prim {};
+    DNN_SAFE_V(dnnl_primitive_create(&prim, pd));
+    auto prim_w = make_benchdnn_dnnl_wrapper(prim);
+
+    dnnl_exec_arg_t args[] = {
+            {DNNL_ARG_SRC_0, lhs.m_},
+            {DNNL_ARG_SRC_1, rhs.m_},
+            {DNNL_ARG_DST, lhs.m_},
+    };
+    DNN_SAFE_V(dnnl_primitive_execute(prim, strm, 3, args));
+    DNN_SAFE_V(dnnl_stream_wait(strm));
+}
+
 // Create a 2-D f32 plain memory on `eng`.
 dnn_mem_t make_2d(dnnl_engine_t eng, int64_t d0, int64_t d1) {
     dnnl_dims_t dims = {d0, d1};
     auto md = dnn_mem_t::init_md(2, dims, dnnl_f32, tag::abx);
     return dnn_mem_t(md, eng, /* prefill = */ false);
+}
+
+// Dequantize a 2D weight tensor in-place: w[k][n] = scale[idx] * (w[k][n] - zp[idx]).
+// For weights shaped [K, N]:
+//   mask=2 (PER_OC):   scale/zp indexed by n only.
+//   mask=3 (PER_OCIC): scale/zp indexed by (k / group_k) * N + n.
+void dequantize_2d(float *w, int64_t K, int64_t N, const dnn_mem_t &scales_m,
+        const dnn_mem_t &zps_m, bool has_scale, bool has_zp, int scale_mask,
+        int zp_mask, const std::vector<dnnl_dim_t> &scale_groups,
+        const std::vector<dnnl_dim_t> &zp_groups) {
+    if (!has_scale && !has_zp) return;
+
+    // Determine K-group size for scales and zero-points.
+    // mask bit 1 (1<<0) set means per-K; group_k subdivides K dimension.
+    const int64_t scale_group_k = (scale_mask & 1)
+            ? (!scale_groups.empty() ? scale_groups[0] : 1)
+            : K;
+    const int64_t zp_group_k
+            = (zp_mask & 1) ? (!zp_groups.empty() ? zp_groups[0] : 1) : K;
+    // N dimension for indexing into scale/zp arrays.
+    const int64_t scale_N = (scale_mask & 2) ? N : 1;
+    const int64_t zp_N = (zp_mask & 2) ? N : 1;
+
+    for (int64_t k = 0; k < K; ++k) {
+        for (int64_t n = 0; n < N; ++n) {
+            const int64_t s_idx
+                    = (k / scale_group_k) * scale_N + (scale_N > 1 ? n : 0);
+            const int64_t z_idx = (k / zp_group_k) * zp_N + (zp_N > 1 ? n : 0);
+            const float scale = has_scale ? scales_m.get_f32_elem(s_idx) : 1.f;
+            const int zp = has_zp ? zps_m.get_elem(z_idx) : 0;
+            w[k * N + n] = scale * (w[k * N + n] - zp);
+        }
+    }
 }
 
 } // anonymous namespace
@@ -129,6 +184,33 @@ void compute_ref(
     std::memcpy(static_cast<float *>(w_down_ref),
             static_cast<float *>(w_down_m), OC * IC * sizeof(float));
 
+    // Dequantize weights if quantization attributes are set.
+    const auto &attr = prb->attr;
+    auto dequant_wei = [&](float *w, int64_t K, int64_t N, int wei_arg) {
+        const bool has_scale = !attr.scales.get(wei_arg).is_def();
+        const bool has_zp = !attr.zero_points.get(wei_arg).is_def();
+        if (!has_scale && !has_zp) return;
+
+        const dnn_mem_t &sc = args.find(DNNL_ARG_ATTR_SCALES | wei_arg);
+        const dnn_mem_t &zp = args.find(DNNL_ARG_ATTR_ZERO_POINTS | wei_arg);
+        const int sc_mask = attr.scales.get_mask(
+                wei_arg, dnnl_undefined_primitive, 2 /*ndims*/);
+        const int zp_mask = has_zp ? attr.zero_points.get_mask(wei_arg,
+                                             dnnl_undefined_primitive, 2)
+                                   : 0;
+        const auto &sc_groups = attr.scales.get(wei_arg).groups;
+        const auto &zp_groups = has_zp ? attr.zero_points.get(wei_arg).groups
+                                       : std::vector<dnnl_dim_t> {};
+        dequantize_2d(w, K, N, sc, zp, has_scale, has_zp, sc_mask, zp_mask,
+                sc_groups, zp_groups);
+    };
+
+    dequant_wei(
+            static_cast<float *>(w_gate_ref), IC, OC, DNNL_ARG_WEIGHTS_GATE);
+    dequant_wei(static_cast<float *>(w_up_ref), IC, OC, DNNL_ARG_WEIGHTS_UP);
+    dequant_wei(
+            static_cast<float *>(w_down_ref), OC, IC, DNNL_ARG_WEIGHTS_DOWN);
+
     // Step 1: up_result = matmul(src, W_up).
     exec_matmul(eng, strm, src_ref, w_up_ref, up_result);
 
@@ -139,12 +221,7 @@ void compute_ref(
     exec_eltwise(eng, strm, gate_result, prb->activation);
 
     // Step 4: gate_result = gate_result * up_result (element-wise).
-    {
-        float *gp = static_cast<float *>(gate_result);
-        const float *up = static_cast<float *>(up_result);
-        for (int64_t i = 0, n = MB * OC; i < n; i++)
-            gp[i] *= up[i];
-    }
+    exec_binary(eng, strm, gate_result, up_result, dnnl_binary_mul);
 
     // Step 5: dst = matmul(gate_result, W_down).
     exec_matmul(eng, strm, gate_result, w_down_ref, out);
