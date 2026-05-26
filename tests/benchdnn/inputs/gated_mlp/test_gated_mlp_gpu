@@ -14,23 +14,23 @@
 # --dt=f16
 # --batch=shapes_llm
 
-# Quantized weights: u4 with per_oc scales
+# Quantized weights: u4 with grouped scales (group_size=128)
 --reset
 --dt=f16:u4:u4:u4:f16
 --stag=ab
 --wtag=ba
 --dtag=ab
 --attr-fpmath=any:true
---attr-scales=wei_gate:per_oc:f16+wei_up:per_oc:f16+wei_down:per_oc:f16
+--attr-scales=wei_gate:per_dim_01:f16:128x1+wei_up:per_dim_01:f16:128x1+wei_down:per_dim_01:f16:128x1
 64x896x4864
 
-# Quantized weights: u4 with per_oc scales and zero-points
+# Quantized weights: u4 with grouped scales and zero-points (group_size=128)
 --reset
 --dt=f16:u4:u4:u4:f16
 --stag=ab
 --wtag=ba
 --dtag=ab
 --attr-fpmath=any:true
---attr-scales=wei_gate:per_oc:f16+wei_up:per_oc:f16+wei_down:per_oc:f16
---attr-zero-points=wei_gate:per_oc:s4+wei_up:per_oc:s4+wei_down:per_oc:s4
-64x896x4864
+--attr-scales=wei_gate:per_dim_01:f16:128x1+wei_up:per_dim_01:f16:128x1+wei_down:per_dim_01:f16:128x1
+--attr-zero-points=wei_gate:per_dim_01:s4:128x1+wei_up:per_dim_01:s4:128x1+wei_down:per_dim_01:s4:128x1
+64x128x4864
