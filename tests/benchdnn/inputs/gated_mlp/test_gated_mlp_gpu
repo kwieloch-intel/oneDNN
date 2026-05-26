@@ -17,12 +17,20 @@
 # Quantized weights: u4 with per_oc scales
 --reset
 --dt=f16:u4:u4:u4:f16
+--stag=ab
+--wtag=ba
+--dtag=ab
+--attr-fpmath=any:true
 --attr-scales=wei_gate:per_oc:f16+wei_up:per_oc:f16+wei_down:per_oc:f16
 64x896x4864
 
 # Quantized weights: u4 with per_oc scales and zero-points
 --reset
 --dt=f16:u4:u4:u4:f16
+--stag=ab
+--wtag=ba
+--dtag=ab
+--attr-fpmath=any:true
 --attr-scales=wei_gate:per_oc:f16+wei_up:per_oc:f16+wei_down:per_oc:f16
 --attr-zero-points=wei_gate:per_oc:s4+wei_up:per_oc:s4+wei_down:per_oc:s4
 64x896x4864
