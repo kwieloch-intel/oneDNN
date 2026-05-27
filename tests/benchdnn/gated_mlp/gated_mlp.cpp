@@ -156,8 +156,10 @@ void skip_invalid_prb(const prb_t *prb, res_t *res) {
 void setup_cmp(compare::compare_t &cmp, const prb_t *prb, data_kind_t kind,
         const args_t &ref_args) {
     // Thresholds are empirical; 3 chained matmuls + activation compound errors.
+    // Factor of 384 = 64 * 6 accounts for error propagation through 3 matmuls
+    // and element-wise ops with non-deterministic GPU accumulation order.
     const int64_t max_acc = std::max(prb->ic, prb->oc);
-    const float trh = 64.f * (1 + max_acc) * epsilon_dt(prb->dst_dt());
+    const float trh = 384.f * (1 + max_acc) * epsilon_dt(prb->dst_dt());
     cmp.set_threshold(trh);
 
     // Absolute tolerance scaled by accumulation length.

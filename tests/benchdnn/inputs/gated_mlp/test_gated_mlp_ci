@@ -1,11 +1,4 @@
-# GPU gated_mlp bug: executing multiple primitives with different shapes
-# in one process produces incorrect results.
-# TODO: uncomment full test set when the GPU implementation is fixed.
 --reset
---dt=f32
-128x256x512
-
-# --reset
-# --dt=f32,f16,bf16
-# --activation=swish,gelu_erf,gelu_tanh
-# --batch=shapes_basic
+--dt=f32,f16,bf16
+--activation=swish,gelu_erf,gelu_tanh
+--batch=shapes_basic
