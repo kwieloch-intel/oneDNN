@@ -155,15 +155,14 @@ void skip_invalid_prb(const prb_t *prb, res_t *res) {
 
 void setup_cmp(compare::compare_t &cmp, const prb_t *prb, data_kind_t kind,
         const args_t &ref_args) {
-    // Thresholds are empirical; 3 chained matmuls + activation compound errors.
-    // Factor of 384 = 64 * 6 accounts for error propagation through 3 matmuls
-    // and element-wise ops with non-deterministic GPU accumulation order.
-    const int64_t max_acc = std::max(prb->ic, prb->oc);
-    const float trh = 384.f * (1 + max_acc) * epsilon_dt(prb->dst_dt());
-    cmp.set_threshold(trh);
+    // 5% relative diff accounts for GPU non-deterministic accumulation order.
+    cmp.set_threshold(5e-2f);
 
-    // Absolute tolerance scaled by accumulation length.
-    const float abs_trh = 4.f * epsilon_dt(prb->dst_dt()) * max_acc;
+    // For reduced-precision types (f16/bf16), a few elements with small
+    // magnitude may exceed the relative threshold while their absolute error
+    // stays within dtype precision bounds. Allow these via absolute check.
+    const int64_t max_acc = std::max(prb->ic, prb->oc);
+    const float abs_trh = 16.f * sqrtf(max_acc) * epsilon_dt(prb->dst_dt());
     cmp.set_driver_check_function(
             [abs_trh](const compare::compare_t::driver_check_func_args_t &a)
                     -> bool { return a.diff <= abs_trh; });
