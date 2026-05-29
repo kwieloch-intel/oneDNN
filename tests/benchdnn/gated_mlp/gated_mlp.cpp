@@ -23,6 +23,7 @@
 
 #include "utils/fill.hpp"
 #include "utils/memory.hpp"
+#include "utils/numeric.hpp"
 #include "utils/parallel.hpp"
 
 #include "dnnl_common.hpp"
@@ -161,11 +162,25 @@ void setup_cmp(compare::compare_t &cmp, const prb_t *prb, data_kind_t kind,
     // For reduced-precision types (f16/bf16), a few elements with small
     // magnitude may exceed the relative threshold while their absolute error
     // stays within dtype precision bounds. Allow these via absolute check.
+    // Also handle saturation: if the f32 reference overflows the dst dtype
+    // range, the GPU correctly saturates to max/min representable value.
     const int64_t max_acc = std::max(prb->ic, prb->oc);
     const float abs_trh = 16.f * sqrtf(max_acc) * epsilon_dt(prb->dst_dt());
+    const auto dst_dt = prb->dst_dt();
     cmp.set_driver_check_function(
-            [abs_trh](const compare::compare_t::driver_check_func_args_t &a)
-                    -> bool { return a.diff <= abs_trh; });
+            [abs_trh, dst_dt](
+                    const compare::compare_t::driver_check_func_args_t &a)
+                    -> bool {
+                // Accept if absolute error is within precision bounds.
+                if (a.diff <= abs_trh) return true;
+                // Accept overflow/saturation: when the f32 reference exceeds
+                // the dst dtype representable range.
+                const float dt_max = max_dt(dst_dt);
+                const float dt_min = lowest_dt(dst_dt);
+                if (a.exp_f32 > dt_max && a.got >= dt_max) return true;
+                if (a.exp_f32 < dt_min && a.got <= dt_min) return true;
+                return false;
+            });
 
     cmp.set_zero_trust_percent(80.f);
 }
