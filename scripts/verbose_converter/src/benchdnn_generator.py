@@ -893,7 +893,7 @@ class GatedMLPConverter(Converter):
     def aux(self):
         alg = self._get_alg()
         if alg is not None:
-            activation = alg[len("eltwise_"):]
+            activation = alg[len("eltwise_") :]
             return f"--activation={activation}"
         return ""
 

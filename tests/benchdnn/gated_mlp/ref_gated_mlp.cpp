@@ -173,32 +173,26 @@ void compute_ref(
     const auto &attr = prb->attr;
     auto dequant_wei
             = [&](const dnn_mem_t &w, int64_t K, int64_t N, int wei_arg) {
-                  const bool has_scale = !attr.scales.get(wei_arg).is_def();
-                  const bool has_zp
-                          = !attr.zero_points.get(wei_arg).is_def();
-                  if (!has_scale && !has_zp) return dnn_mem_t();
+        const bool has_scale = !attr.scales.get(wei_arg).is_def();
+        const bool has_zp = !attr.zero_points.get(wei_arg).is_def();
+        if (!has_scale && !has_zp) return dnn_mem_t();
 
-                  const dnn_mem_t &sc
-                          = args.find(DNNL_ARG_ATTR_SCALES | wei_arg);
-                  const dnn_mem_t &zp
-                          = args.find(DNNL_ARG_ATTR_ZERO_POINTS | wei_arg);
-                  const int sc_mask = attr.scales.get_mask(
-                          wei_arg, dnnl_undefined_primitive, 2 /*ndims*/);
-                  const int zp_mask
-                          = has_zp ? attr.zero_points.get_mask(
-                                    wei_arg, dnnl_undefined_primitive, 2)
+        const dnn_mem_t &sc = args.find(DNNL_ARG_ATTR_SCALES | wei_arg);
+        const dnn_mem_t &zp = args.find(DNNL_ARG_ATTR_ZERO_POINTS | wei_arg);
+        const int sc_mask = attr.scales.get_mask(
+                wei_arg, dnnl_undefined_primitive, 2 /*ndims*/);
+        const int zp_mask = has_zp ? attr.zero_points.get_mask(wei_arg,
+                                             dnnl_undefined_primitive, 2)
                                    : 0;
-                  const auto &sc_groups = attr.scales.get(wei_arg).groups;
-                  const auto &zp_groups
-                          = has_zp ? attr.zero_points.get(wei_arg).groups
-                                   : std::vector<dnnl_dim_t> {};
-                  auto retn = make_2d(eng, K, N);
-                  std::memcpy((float *)retn, (float *)w,
-                          K * N * sizeof(float));
-                  dequantize_2d((float *)retn, K, N, sc, zp, has_scale, has_zp,
-                          sc_mask, zp_mask, sc_groups, zp_groups);
-                  return retn;
-              };
+        const auto &sc_groups = attr.scales.get(wei_arg).groups;
+        const auto &zp_groups = has_zp ? attr.zero_points.get(wei_arg).groups
+                                       : std::vector<dnnl_dim_t> {};
+        auto retn = make_2d(eng, K, N);
+        std::memcpy((float *)retn, (float *)w, K * N * sizeof(float));
+        dequantize_2d((float *)retn, K, N, sc, zp, has_scale, has_zp, sc_mask,
+                zp_mask, sc_groups, zp_groups);
+        return retn;
+    };
 
     auto w_gate_ref = dequant_wei(w_gate_m, IC, OC, DNNL_ARG_WEIGHTS_GATE);
     auto w_up_ref = dequant_wei(w_up_m, IC, OC, DNNL_ARG_WEIGHTS_UP);

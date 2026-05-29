@@ -171,16 +171,16 @@ void setup_cmp(compare::compare_t &cmp, const prb_t *prb, data_kind_t kind,
             [abs_trh, dst_dt](
                     const compare::compare_t::driver_check_func_args_t &a)
                     -> bool {
-                // Accept if absolute error is within precision bounds.
-                if (a.diff <= abs_trh) return true;
-                // Accept overflow/saturation: when the f32 reference exceeds
-                // the dst dtype representable range.
-                const float dt_max = max_dt(dst_dt);
-                const float dt_min = lowest_dt(dst_dt);
-                if (a.exp_f32 > dt_max && a.got >= dt_max) return true;
-                if (a.exp_f32 < dt_min && a.got <= dt_min) return true;
-                return false;
-            });
+        // Accept if absolute error is within precision bounds.
+        if (a.diff <= abs_trh) return true;
+        // Accept overflow/saturation: when the f32 reference exceeds
+        // the dst dtype representable range.
+        const float dt_max = max_dt(dst_dt);
+        const float dt_min = lowest_dt(dst_dt);
+        if (a.exp_f32 > dt_max && a.got >= dt_max) return true;
+        if (a.exp_f32 < dt_min && a.got <= dt_min) return true;
+        return false;
+    });
 
     cmp.set_zero_trust_percent(80.f);
 }
