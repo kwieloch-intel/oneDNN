@@ -42,7 +42,7 @@ namespace {
 
 // Execute a matmul primitive on CPU: dst = src x wei.
 void exec_matmul(dnnl_engine_t eng, dnnl_stream_t strm, const dnn_mem_t &src,
-        const dnn_mem_t &wei, dnn_mem_t &dst) {
+        const dnn_mem_t &wei, const dnn_mem_t &dst) {
     dnnl_primitive_desc_t pd {};
     DNN_SAFE_V(dnnl_matmul_primitive_desc_create(
             &pd, eng, src.md_, wei.md_, nullptr, dst.md_, nullptr));
@@ -166,69 +166,60 @@ void compute_ref(
     const int64_t OC = prb->oc;
 
     // 2-D f32 memories for intermediate results.
-    auto src_ref = make_2d(eng, MB, IC);
-    auto w_gate_ref = make_2d(eng, IC, OC);
-    auto w_up_ref = make_2d(eng, IC, OC);
-    auto w_down_ref = make_2d(eng, OC, IC);
     auto up_result = make_2d(eng, MB, OC);
     auto gate_result = make_2d(eng, MB, OC);
-    auto out = make_2d(eng, MB, IC);
-
-    // Copy input data.
-    std::memcpy(static_cast<float *>(src_ref), static_cast<float *>(src_m),
-            MB * IC * sizeof(float));
-    std::memcpy(static_cast<float *>(w_gate_ref),
-            static_cast<float *>(w_gate_m), IC * OC * sizeof(float));
-    std::memcpy(static_cast<float *>(w_up_ref), static_cast<float *>(w_up_m),
-            IC * OC * sizeof(float));
-    std::memcpy(static_cast<float *>(w_down_ref),
-            static_cast<float *>(w_down_m), OC * IC * sizeof(float));
 
     // Dequantize weights if quantization attributes are set.
     const auto &attr = prb->attr;
-    auto dequant_wei = [&](float *w, int64_t K, int64_t N, int wei_arg) {
-        const bool has_scale = !attr.scales.get(wei_arg).is_def();
-        const bool has_zp = !attr.zero_points.get(wei_arg).is_def();
-        if (!has_scale && !has_zp) return;
+    auto dequant_wei
+            = [&](const dnn_mem_t &w, int64_t K, int64_t N, int wei_arg) {
+                  const bool has_scale = !attr.scales.get(wei_arg).is_def();
+                  const bool has_zp
+                          = !attr.zero_points.get(wei_arg).is_def();
+                  if (!has_scale && !has_zp) return dnn_mem_t();
 
-        const dnn_mem_t &sc = args.find(DNNL_ARG_ATTR_SCALES | wei_arg);
-        const dnn_mem_t &zp = args.find(DNNL_ARG_ATTR_ZERO_POINTS | wei_arg);
-        const int sc_mask = attr.scales.get_mask(
-                wei_arg, dnnl_undefined_primitive, 2 /*ndims*/);
-        const int zp_mask = has_zp ? attr.zero_points.get_mask(wei_arg,
-                                             dnnl_undefined_primitive, 2)
+                  const dnn_mem_t &sc
+                          = args.find(DNNL_ARG_ATTR_SCALES | wei_arg);
+                  const dnn_mem_t &zp
+                          = args.find(DNNL_ARG_ATTR_ZERO_POINTS | wei_arg);
+                  const int sc_mask = attr.scales.get_mask(
+                          wei_arg, dnnl_undefined_primitive, 2 /*ndims*/);
+                  const int zp_mask
+                          = has_zp ? attr.zero_points.get_mask(
+                                    wei_arg, dnnl_undefined_primitive, 2)
                                    : 0;
-        const auto &sc_groups = attr.scales.get(wei_arg).groups;
-        const auto &zp_groups = has_zp ? attr.zero_points.get(wei_arg).groups
-                                       : std::vector<dnnl_dim_t> {};
-        dequantize_2d(w, K, N, sc, zp, has_scale, has_zp, sc_mask, zp_mask,
-                sc_groups, zp_groups);
-    };
+                  const auto &sc_groups = attr.scales.get(wei_arg).groups;
+                  const auto &zp_groups
+                          = has_zp ? attr.zero_points.get(wei_arg).groups
+                                   : std::vector<dnnl_dim_t> {};
+                  auto retn = make_2d(eng, K, N);
+                  std::memcpy((float *)retn, (float *)w,
+                          K * N * sizeof(float));
+                  dequantize_2d((float *)retn, K, N, sc, zp, has_scale, has_zp,
+                          sc_mask, zp_mask, sc_groups, zp_groups);
+                  return retn;
+              };
 
-    dequant_wei(
-            static_cast<float *>(w_gate_ref), IC, OC, DNNL_ARG_WEIGHTS_GATE);
-    dequant_wei(static_cast<float *>(w_up_ref), IC, OC, DNNL_ARG_WEIGHTS_UP);
-    dequant_wei(
-            static_cast<float *>(w_down_ref), OC, IC, DNNL_ARG_WEIGHTS_DOWN);
+    auto w_gate_ref = dequant_wei(w_gate_m, IC, OC, DNNL_ARG_WEIGHTS_GATE);
+    auto w_up_ref = dequant_wei(w_up_m, IC, OC, DNNL_ARG_WEIGHTS_UP);
+    auto w_down_ref = dequant_wei(w_down_m, OC, IC, DNNL_ARG_WEIGHTS_DOWN);
 
     // Step 1: up_result = matmul(src, W_up).
-    exec_matmul(eng, strm, src_ref, w_up_ref, up_result);
+    exec_matmul(eng, strm, src_m, (w_up_ref) ? w_up_ref : w_up_m, up_result);
 
     // Step 2: gate_result = matmul(src, W_gate).
-    exec_matmul(eng, strm, src_ref, w_gate_ref, gate_result);
+    exec_matmul(eng, strm, src_m, (w_gate_ref) ? w_gate_ref : w_gate_m,
+            gate_result);
 
     // Step 3: gate_result = activation(gate_result).
     exec_eltwise(eng, strm, gate_result, prb->activation);
 
-    // Step 4: gate_result = gate_result * up_result (element-wise).
-    exec_binary(eng, strm, gate_result, up_result, dnnl_binary_mul);
+    // Step 4: up_result = up_result * gate_result (element-wise).
+    exec_binary(eng, strm, up_result, gate_result, dnnl_binary_mul);
 
-    // Step 5: dst = matmul(gate_result, W_down).
-    exec_matmul(eng, strm, gate_result, w_down_ref, out);
-
-    // Copy result to DST.
-    std::memcpy(static_cast<float *>(dst_m), static_cast<float *>(out),
-            MB * IC * sizeof(float));
+    // Step 5: dst = matmul(up_result, W_down).
+    exec_matmul(
+            eng, strm, up_result, (w_down_ref) ? w_down_ref : w_down_m, dst_m);
 
     DNN_SAFE_V(dnnl_stream_destroy(strm));
 }
