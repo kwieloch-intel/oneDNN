@@ -40,6 +40,14 @@ tensor shapes are derived from these three values:
 - Down weights: `[OC, IC]`
 - Destination: `[MB, IC]`
 
+When a 3D tag is specified (e.g. `--stag=abc --wtag=cab --dtag=abc`), the
+driver creates "fake 3D" tensors with a unit dimension matching the layout used
+by OpenVINO networks:
+- Source: `[MB, 1, IC]`
+- Gate/Up weights: `[1, IC, OC]`
+- Down weights: `[1, OC, IC]`
+- Destination: `[MB, 1, IC]`
+
 ## Quantization Attributes
 
 The driver supports `--attr-scales` and `--attr-zero-points` for weight

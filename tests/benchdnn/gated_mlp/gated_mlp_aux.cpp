@@ -53,15 +53,17 @@ dnnl_data_type_t prb_t::get_dt(data_kind_t data_kind) const {
 benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> prb_t::get_md(int arg) const {
     switch (arg) {
         case DNNL_ARG_SRC:
-            return dnn_mem_t::init_md(2, src_dims.data(), src_dt(), stag);
+            return dnn_mem_t::init_md(ndims, src_dims.data(), src_dt(), stag);
         case DNNL_ARG_WEIGHTS_GATE:
-            return dnn_mem_t::init_md(2, w_gate_dims.data(), w_gate_dt(), wtag);
+            return dnn_mem_t::init_md(
+                    ndims, w_gate_dims.data(), w_gate_dt(), wtag);
         case DNNL_ARG_WEIGHTS_UP:
-            return dnn_mem_t::init_md(2, w_up_dims.data(), w_up_dt(), wtag);
+            return dnn_mem_t::init_md(ndims, w_up_dims.data(), w_up_dt(), wtag);
         case DNNL_ARG_WEIGHTS_DOWN:
-            return dnn_mem_t::init_md(2, w_down_dims.data(), w_down_dt(), wtag);
+            return dnn_mem_t::init_md(
+                    ndims, w_down_dims.data(), w_down_dt(), wtag);
         case DNNL_ARG_DST:
-            return dnn_mem_t::init_md(2, dst_dims.data(), dst_dt(), dtag);
+            return dnn_mem_t::init_md(ndims, dst_dims.data(), dst_dt(), dtag);
         default:
             assert(!"unsupported arg");
             return make_benchdnn_dnnl_wrapper<dnnl_memory_desc_t>(nullptr);

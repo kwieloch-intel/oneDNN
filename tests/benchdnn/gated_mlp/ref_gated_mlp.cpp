@@ -114,6 +114,13 @@ dnn_mem_t make_2d(dnnl_engine_t eng, int64_t d0, int64_t d1) {
     return dnn_mem_t(md, eng, /* prefill = */ false);
 }
 
+// Create an f32 plain memory on `eng` with the given dims.
+dnn_mem_t make_mem(dnnl_engine_t eng, const dims_t &d) {
+    auto md = dnn_mem_t::init_md(
+            static_cast<int>(d.size()), d.data(), dnnl_f32, tag::abx);
+    return dnn_mem_t(md, eng, /* prefill = */ false);
+}
+
 // Dequantize a 2D weight tensor in-place: w[k][n] = scale[idx] * (w[k][n] - zp[idx]).
 // For weights shaped [K, N]:
 //   mask=2 (PER_OC):   scale/zp indexed by n only.
@@ -164,14 +171,17 @@ void compute_ref(
     const int64_t MB = prb->mb;
     const int64_t IC = prb->ic;
     const int64_t OC = prb->oc;
+    const bool is_3d = prb->ndims == 3;
 
-    // 2-D f32 memories for intermediate results.
-    auto up_result = make_2d(eng, MB, OC);
-    auto gate_result = make_2d(eng, MB, OC);
+    // Intermediate buffers match input ndims.
+    const dims_t inter_dims = is_3d ? dims_t {MB, 1, OC} : dims_t {MB, OC};
+    auto up_result = make_mem(eng, inter_dims);
+    auto gate_result = make_mem(eng, inter_dims);
 
     // Dequantize if quantization attributes are set.
     const auto &attr = prb->attr;
-    auto dequant = [&](const dnn_mem_t &m, int64_t K, int64_t N, int arg) {
+    auto dequant = [&](const dnn_mem_t &m, const dims_t &buf_dims, int64_t K,
+                           int64_t N, int arg) {
         const bool has_scale = !attr.scales.get(arg).is_def();
         const bool has_zp = !attr.zero_points.get(arg).is_def();
         if (!has_scale && !has_zp) return dnn_mem_t();
@@ -186,17 +196,20 @@ void compute_ref(
         const auto &sc_groups = attr.scales.get(arg).groups;
         const auto &zp_groups = has_zp ? attr.zero_points.get(arg).groups
                                        : std::vector<dnnl_dim_t> {};
-        auto retn = make_2d(eng, K, N);
+        auto retn = make_mem(eng, buf_dims);
         std::memcpy((float *)retn, (float *)m, K * N * sizeof(float));
         dequantize_2d((float *)retn, K, N, sc, zp, has_scale, has_zp, sc_mask,
                 zp_mask, sc_groups, zp_groups);
         return retn;
     };
 
-    auto src_ref = dequant(src_m, MB, IC, DNNL_ARG_SRC);
-    auto w_gate_ref = dequant(w_gate_m, IC, OC, DNNL_ARG_WEIGHTS_GATE);
-    auto w_up_ref = dequant(w_up_m, IC, OC, DNNL_ARG_WEIGHTS_UP);
-    auto w_down_ref = dequant(w_down_m, OC, IC, DNNL_ARG_WEIGHTS_DOWN);
+    auto src_ref = dequant(src_m, prb->src_dims, MB, IC, DNNL_ARG_SRC);
+    auto w_gate_ref = dequant(
+            w_gate_m, prb->w_gate_dims, IC, OC, DNNL_ARG_WEIGHTS_GATE);
+    auto w_up_ref
+            = dequant(w_up_m, prb->w_up_dims, IC, OC, DNNL_ARG_WEIGHTS_UP);
+    auto w_down_ref = dequant(
+            w_down_m, prb->w_down_dims, OC, IC, DNNL_ARG_WEIGHTS_DOWN);
 
     const dnn_mem_t &src = src_ref ? src_ref : src_m;
 

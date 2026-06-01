@@ -35,7 +35,8 @@ namespace gated_mlp {
 
 benchdnn_dnnl_wrapper_t<dnnl_memory_desc_t> create_md(
         const dims_t &dims, dnnl_data_type_t dt, const std::string &tag) {
-    return dnn_mem_t::init_md(2, dims.data(), dt, tag);
+    return dnn_mem_t::init_md(
+            static_cast<int>(dims.size()), dims.data(), dt, tag);
 }
 
 dnnl_status_t init_pd(init_pd_args_t<prb_t> &init_pd_args) {
@@ -56,7 +57,7 @@ dnnl_status_t init_pd(init_pd_args_t<prb_t> &init_pd_args) {
     auto dst_d = create_md(prb->dst_dims, dst_dt, prb->dtag);
 
     auto dnnl_attr = make_benchdnn_dnnl_wrapper(
-            create_dnnl_attr(prb->attr, attr_args_t(), 2));
+            create_dnnl_attr(prb->attr, attr_args_t(), prb->ndims));
 
     TIME_C_PD(DNN_SAFE_STATUS(dnnl_gated_mlp_primitive_desc_create(
             &init_pd_args.pd, init_pd_args.engine, src_d, w_gate_d, w_up_d,

@@ -99,12 +99,36 @@ struct prb_t : public prb_dims_t {
         ic = dims[1];
         oc = dims[2];
 
-        // Derive tensor shapes.
-        src_dims = {mb, ic};
-        w_gate_dims = {ic, oc};
-        w_up_dims = {ic, oc};
-        w_down_dims = {oc, ic};
-        dst_dims = {mb, ic};
+        // Determine ndims from tags. Explicit tags (e.g. "abc", "cab")
+        // imply 3D; generic tags ("abx") default to 2D.
+        auto tag_ndims = [](const std::string &t) -> int {
+            if (t == tag::abx || t == tag::axb || t == tag::any
+                    || t == tag::undef)
+                return 0;
+            int n = 0;
+            for (char c : t)
+                if (c >= 'a' && c <= 'l') n = std::max(n, c - 'a' + 1);
+            return n;
+        };
+        ndims = std::max({2, tag_ndims(this->stag), tag_ndims(this->wtag),
+                tag_ndims(this->dtag)});
+
+        // Derive tensor shapes. For 3D ("fake batch"), prepend/insert a
+        // unit dimension to match OV's layout: SRC/DST=[MB,1,IC],
+        // W_GATE/W_UP=[1,IC,OC], W_DOWN=[1,OC,IC].
+        if (ndims == 3) {
+            src_dims = {mb, 1, ic};
+            w_gate_dims = {1, ic, oc};
+            w_up_dims = {1, ic, oc};
+            w_down_dims = {1, oc, ic};
+            dst_dims = {mb, 1, ic};
+        } else {
+            src_dims = {mb, ic};
+            w_gate_dims = {ic, oc};
+            w_up_dims = {ic, oc};
+            w_down_dims = {oc, ic};
+            dst_dims = {mb, ic};
+        }
 
         // FLOPs: 3 matmuls + element-wise ops.
         // matmul(src, W_gate): 2*MB*IC*OC
@@ -116,6 +140,7 @@ struct prb_t : public prb_dims_t {
     }
 
     int64_t mb, ic, oc;
+    int ndims;
     dir_t dir = FLAG_FWD; // Always forward.
     std::vector<dnnl_data_type_t> dt;
     std::string stag, wtag, dtag;
@@ -150,9 +175,9 @@ struct perf_report_t : public base_perf_report_t {
     perf_report_t(const prb_t *prb, const char *perf_template)
         : base_perf_report_t(perf_template)
         , p_(prb)
-        , stag_({normalize_tag(p_->stag, 2)})
-        , wtag_(normalize_tag(p_->wtag, 2))
-        , dtag_(normalize_tag(p_->dtag, 2)) {}
+        , stag_({normalize_tag(p_->stag, p_->ndims)})
+        , wtag_(normalize_tag(p_->wtag, p_->ndims))
+        , dtag_(normalize_tag(p_->dtag, p_->ndims)) {}
 
     void dump_desc(std::ostream &s) const override {
         s << static_cast<const prb_dims_t &>(*p_);
