@@ -159,11 +159,10 @@ void setup_cmp(compare::compare_t &cmp, const prb_t *prb, data_kind_t kind,
     // 5% relative diff accounts for GPU non-deterministic accumulation order.
     cmp.set_threshold(5e-2f);
 
-    // For reduced-precision types (f16/bf16), a few elements with small
-    // magnitude may exceed the relative threshold while their absolute error
-    // stays within dtype precision bounds. Allow these via absolute check.
-    // Also handle saturation: if the f32 reference overflows the dst dtype
-    // range, the GPU correctly saturates to max/min representable value.
+    // For reduced-precision types, allow small-magnitude elements whose
+    // absolute error stays within dtype precision bounds.
+    // Also handle overflow boundary where one value crosses to ±INF
+    // while the other is several ULPs short.
     const int64_t max_acc = std::max(prb->ic, prb->oc);
     const float abs_trh = 16.f * sqrtf(max_acc) * epsilon_dt(prb->dst_dt());
     const auto dst_dt = prb->dst_dt();
@@ -173,12 +172,13 @@ void setup_cmp(compare::compare_t &cmp, const prb_t *prb, data_kind_t kind,
                     -> bool {
         // Accept if absolute error is within precision bounds.
         if (a.diff <= abs_trh) return true;
-        // Accept overflow/saturation: when the f32 reference exceeds
-        // the dst dtype representable range.
+        // Accept overflow: both values near or beyond the dtype boundary.
         const float dt_max = max_dt(dst_dt);
         const float dt_min = lowest_dt(dst_dt);
-        if (a.exp_f32 > dt_max && a.got >= dt_max) return true;
-        if (a.exp_f32 < dt_min && a.got <= dt_min) return true;
+        const float near_max = dt_max * (1.f - 5e-2f);
+        const float near_min = dt_min * (1.f - 5e-2f);
+        if (a.exp_f32 >= near_max && a.got >= near_max) return true;
+        if (a.exp_f32 <= near_min && a.got <= near_min) return true;
         return false;
     });
 
