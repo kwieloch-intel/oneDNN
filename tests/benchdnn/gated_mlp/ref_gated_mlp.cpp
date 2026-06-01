@@ -169,41 +169,43 @@ void compute_ref(
     auto up_result = make_2d(eng, MB, OC);
     auto gate_result = make_2d(eng, MB, OC);
 
-    // Dequantize weights if quantization attributes are set.
+    // Dequantize if quantization attributes are set.
     const auto &attr = prb->attr;
-    auto dequant_wei
-            = [&](const dnn_mem_t &w, int64_t K, int64_t N, int wei_arg) {
-        const bool has_scale = !attr.scales.get(wei_arg).is_def();
-        const bool has_zp = !attr.zero_points.get(wei_arg).is_def();
+    auto dequant = [&](const dnn_mem_t &m, int64_t K, int64_t N, int arg) {
+        const bool has_scale = !attr.scales.get(arg).is_def();
+        const bool has_zp = !attr.zero_points.get(arg).is_def();
         if (!has_scale && !has_zp) return dnn_mem_t();
 
-        const dnn_mem_t &sc = args.find(DNNL_ARG_ATTR_SCALES | wei_arg);
-        const dnn_mem_t &zp = args.find(DNNL_ARG_ATTR_ZERO_POINTS | wei_arg);
+        const dnn_mem_t &sc = args.find(DNNL_ARG_ATTR_SCALES | arg);
+        const dnn_mem_t &zp = args.find(DNNL_ARG_ATTR_ZERO_POINTS | arg);
         const int sc_mask = attr.scales.get_mask(
-                wei_arg, dnnl_undefined_primitive, 2 /*ndims*/);
-        const int zp_mask = has_zp ? attr.zero_points.get_mask(wei_arg,
-                                             dnnl_undefined_primitive, 2)
-                                   : 0;
-        const auto &sc_groups = attr.scales.get(wei_arg).groups;
-        const auto &zp_groups = has_zp ? attr.zero_points.get(wei_arg).groups
+                arg, dnnl_undefined_primitive, 2 /*ndims*/);
+        const int zp_mask = has_zp
+                ? attr.zero_points.get_mask(arg, dnnl_undefined_primitive, 2)
+                : 0;
+        const auto &sc_groups = attr.scales.get(arg).groups;
+        const auto &zp_groups = has_zp ? attr.zero_points.get(arg).groups
                                        : std::vector<dnnl_dim_t> {};
         auto retn = make_2d(eng, K, N);
-        std::memcpy((float *)retn, (float *)w, K * N * sizeof(float));
+        std::memcpy((float *)retn, (float *)m, K * N * sizeof(float));
         dequantize_2d((float *)retn, K, N, sc, zp, has_scale, has_zp, sc_mask,
                 zp_mask, sc_groups, zp_groups);
         return retn;
     };
 
-    auto w_gate_ref = dequant_wei(w_gate_m, IC, OC, DNNL_ARG_WEIGHTS_GATE);
-    auto w_up_ref = dequant_wei(w_up_m, IC, OC, DNNL_ARG_WEIGHTS_UP);
-    auto w_down_ref = dequant_wei(w_down_m, OC, IC, DNNL_ARG_WEIGHTS_DOWN);
+    auto src_ref = dequant(src_m, MB, IC, DNNL_ARG_SRC);
+    auto w_gate_ref = dequant(w_gate_m, IC, OC, DNNL_ARG_WEIGHTS_GATE);
+    auto w_up_ref = dequant(w_up_m, IC, OC, DNNL_ARG_WEIGHTS_UP);
+    auto w_down_ref = dequant(w_down_m, OC, IC, DNNL_ARG_WEIGHTS_DOWN);
+
+    const dnn_mem_t &src = src_ref ? src_ref : src_m;
 
     // Step 1: up_result = matmul(src, W_up).
-    exec_matmul(eng, strm, src_m, (w_up_ref) ? w_up_ref : w_up_m, up_result);
+    exec_matmul(eng, strm, src, (w_up_ref) ? w_up_ref : w_up_m, up_result);
 
     // Step 2: gate_result = matmul(src, W_gate).
-    exec_matmul(eng, strm, src_m, (w_gate_ref) ? w_gate_ref : w_gate_m,
-            gate_result);
+    exec_matmul(
+            eng, strm, src, (w_gate_ref) ? w_gate_ref : w_gate_m, gate_result);
 
     // Step 3: gate_result = activation(gate_result).
     exec_eltwise(eng, strm, gate_result, prb->activation);
