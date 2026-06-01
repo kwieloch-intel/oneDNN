@@ -43,27 +43,27 @@ tensor shapes are derived from these three values:
 ## Quantization Attributes
 
 The driver supports `--attr-scales` and `--attr-zero-points` for weight
-dequantization. Supported argument names are `wei_gate`, `wei_up`, and
-`wei_down`, corresponding to the gate, up, and down projection weights.
+dequantization. Supported argument names are `wei`, `wei_up`, and `wei_down`,
+corresponding to the gate, up, and down projection weights.
 
 Supported policies:
 - `common` -- single scale/zero-point shared across the entire tensor.
-- `per_oc` -- one value per output channel (dimension 1 of the weight tensor).
-- `per_ocic` -- grouped quantization along both dimensions (group size specified
-            inline, e.g., `per_ocic:f16:32x1`).
+- `per_dim_1` -- one value per output channel (dimension 1 of the weight tensor).
+- `per_dim_01` -- grouped quantization along both dimensions (group size
+            specified inline, e.g., `per_dim_01:f16:32x1`).
 
-Example: run u4 quantized weights with per-oc f32 scales:
+Example: run u4 quantized weights with per-channel f32 scales:
 ``` sh
     ./benchdnn --gated_mlp --dt=f32:u4:u4:u4:f32 \
-               --attr-scales=wei_gate:per_oc:f32+wei_up:per_oc:f32+wei_down:per_oc:f32 \
+               --attr-scales=wei:per_dim_1:f32+wei_up:per_dim_1:f32+wei_down:per_dim_1:f32 \
                64x128x256
 ```
 
 Example: grouped quantization with groups along the K-dimension:
 ``` sh
     ./benchdnn --gated_mlp --dt=f32:u4:u4:u4:f32 \
-               --attr-scales=wei_gate:per_ocic:f32:32x1+wei_up:per_ocic:f32:32x1+wei_down:per_ocic:f32:32x1 \
-               --attr-zero-points=wei_gate:per_ocic:s4:32x1+wei_up:per_ocic:s4:32x1+wei_down:per_ocic:s4:32x1 \
+               --attr-scales=wei:per_dim_01:f32:32x1+wei_up:per_dim_01:f32:32x1+wei_down:per_dim_01:f32:32x1 \
+               --attr-zero-points=wei:per_dim_01:s4:32x1+wei_up:per_dim_01:s4:32x1+wei_down:per_dim_01:s4:32x1 \
                64x128x256
 ```
 
