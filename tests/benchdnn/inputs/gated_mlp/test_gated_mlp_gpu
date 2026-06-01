@@ -15,6 +15,7 @@
 --dtag=ab
 --attr-fpmath=any:true
 --attr-scales=wei:per_dim_01:f16:128x1+wei_up:per_dim_01:f16:128x1+wei_down:per_dim_01:f16:128x1
+64x128x4864
 64x896x4864
 
 # Quantized weights: u4 with grouped scales and zero-points (group_size=128)
@@ -27,3 +28,4 @@
 --attr-scales=wei:per_dim_01:f16:128x1+wei_up:per_dim_01:f16:128x1+wei_down:per_dim_01:f16:128x1
 --attr-zero-points=wei:per_dim_01:s4:128x1+wei_up:per_dim_01:s4:128x1+wei_down:per_dim_01:s4:128x1
 64x128x4864
+64x896x4864
