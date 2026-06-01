@@ -107,13 +107,6 @@ void exec_binary(dnnl_engine_t eng, dnnl_stream_t strm, dnn_mem_t &lhs,
     DNN_SAFE_V(dnnl_stream_wait(strm));
 }
 
-// Create a 2-D f32 plain memory on `eng`.
-dnn_mem_t make_2d(dnnl_engine_t eng, int64_t d0, int64_t d1) {
-    dnnl_dims_t dims = {d0, d1};
-    auto md = dnn_mem_t::init_md(2, dims, dnnl_f32, tag::abx);
-    return dnn_mem_t(md, eng, /* prefill = */ false);
-}
-
 // Create an f32 plain memory on `eng` with the given dims.
 dnn_mem_t make_mem(dnnl_engine_t eng, const dims_t &d) {
     auto md = dnn_mem_t::init_md(
