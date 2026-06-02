@@ -33,8 +33,8 @@ namespace gated_mlp {
 //   up     = matmul(src, W_up)            -> [MB, OC]
 //   gate   = matmul(src, W_gate)          -> [MB, OC]
 //   gate   = eltwise(gate, activation)    -> [MB, OC]
-//   gate   = gate * up                    -> [MB, OC]  (element-wise)
-//   dst    = matmul(gate, W_down)         -> [MB, IC]
+//   up     = up * gate                    -> [MB, OC]  (elementwise)
+//   dst    = matmul(up, W_down)           -> [MB, IC]
 //
 // All intermediate computation is done in f32 on the CPU engine.
 
@@ -114,36 +114,64 @@ dnn_mem_t make_mem(dnnl_engine_t eng, const dims_t &d) {
     return dnn_mem_t(md, eng, /* prefill = */ false);
 }
 
-// Dequantize a 2D weight tensor in-place: w[k][n] = scale[idx] * (w[k][n] - zp[idx]).
+// Dequantize a tensor in-place:
+//   t[k][n] = scale[idx] * (t[k][n] - zp[idx]).
 // For weights shaped [K, N]:
-//   mask=2 (PER_OC):   scale/zp indexed by n only.
-//   mask=3 (PER_OCIC): scale/zp indexed by (k / group_k) * N + n.
-void dequantize_2d(float *w, int64_t K, int64_t N, const dnn_mem_t &scales_m,
-        const dnn_mem_t &zps_m, bool has_scale, bool has_zp, int scale_mask,
-        int zp_mask, const std::vector<dnnl_dim_t> &scale_groups,
-        const std::vector<dnnl_dim_t> &zp_groups) {
+//   mask=2: scale/zp indexed by n only.
+//   mask=3: scale/zp indexed by (k / group_k) and n.
+void dequantize_buf(const dnn_mem_t &buf, int64_t K, int64_t N, bool has_scale,
+        int scale_mask, const std::vector<dnnl_dim_t> &scale_grp,
+        const dnn_mem_t &scales_m, bool has_zp, int zp_mask,
+        const std::vector<dnnl_dim_t> &zp_grp, const dnn_mem_t &zps_m, bool T) {
     if (!has_scale && !has_zp) return;
 
-    // Determine K-group size for scales and zero-points.
-    // mask bit 1 (1<<0) set means per-K; group_k subdivides K dimension.
-    const int64_t scale_group_k = (scale_mask & 1)
-            ? (!scale_groups.empty() ? scale_groups[0] : 1)
-            : K;
-    const int64_t zp_group_k
-            = (zp_mask & 1) ? (!zp_groups.empty() ? zp_groups[0] : 1) : K;
-    // N dimension for indexing into scale/zp arrays.
-    const int64_t scale_N = (scale_mask & 2) ? N : 1;
-    const int64_t zp_N = (zp_mask & 2) ? N : 1;
+    int kmask = 1 << (int)T;
+    int nmask = 1 << (int)!T;
+    if ((buf.ndims() == 3) && (buf.dims()[0] >= 2) && (buf.dims()[1] == 1)) {
+        kmask <<= (int)T;
+        nmask <<= (int)!T;
+    }
+    if ((buf.ndims() == 3) && (buf.dims()[0] == 1) && (buf.dims()[1] >= 2)) {
+        kmask <<= 1;
+        nmask <<= 1;
+    }
 
-    for (int64_t k = 0; k < K; ++k) {
-        for (int64_t n = 0; n < N; ++n) {
-            const int64_t s_idx
-                    = (k / scale_group_k) * scale_N + (scale_N > 1 ? n : 0);
-            const int64_t z_idx = (k / zp_group_k) * zp_N + (zp_N > 1 ? n : 0);
-            const float scale = has_scale ? scales_m.get_f32_elem(s_idx) : 1.f;
-            const int zp = has_zp ? zps_m.get_elem(z_idx) : 0;
-            w[k * N + n] = scale * (w[k * N + n] - zp);
-        }
+    // Determine K-group size for scales and zero-points;
+    // mask bit 1 (1<<0) set means per-K; k*_group subdivides K dimension
+    int64_t kz_grp = (zp_mask & kmask) ? (zp_grp.empty()) ? 1 : zp_grp[T] : K;
+    int64_t ks_grp
+            = (scale_mask & kmask) ? (scale_grp.empty()) ? 1 : scale_grp[T] : K;
+
+    bool nz_inc = zp_mask & nmask;
+    bool ns_inc = scale_mask & nmask;
+
+    auto t = (float *)buf;
+    if (T) { // if transposed
+        int64_t nz_mult = (nz_inc) ? K / kz_grp : 1;
+        int64_t ns_mult = (ns_inc) ? K / ks_grp : 1;
+        for (int64_t n = 0, nz = 0, ns = 0; n < N;
+                ++n, nz += nz_inc, ns += ns_inc)
+            for (int64_t k = 0, kz = 0, ks = 0; k < K; ++k,
+                         kz = (k >= (kz + 1) * kz_grp) ? kz + 1 : kz,
+                         ks = (k >= (ks + 1) * ks_grp) ? ks + 1 : ks) {
+                auto z = (has_zp) ? zps_m.get_f32_elem(nz * nz_mult + kz) : 0.f;
+                auto s = (has_scale) ? scales_m.get_f32_elem(ns * ns_mult + ks)
+                                     : 1.f;
+                t[n * K + k] = s * (t[n * K + k] - z);
+            }
+    } else { // if not transposed
+        int64_t kz_mult = (nz_inc) ? N : 1;
+        int64_t ks_mult = (ns_inc) ? N : 1;
+        for (int64_t k = 0, kz = 0, ks = 0; k < K; ++k,
+                     kz = (k >= (kz + 1) * kz_grp) ? kz + 1 : kz,
+                     ks = (k >= (ks + 1) * ks_grp) ? ks + 1 : ks)
+            for (int64_t n = 0, nz = 0, ns = 0; n < N;
+                    ++n, nz += nz_inc, ns += ns_inc) {
+                auto z = (has_zp) ? zps_m.get_f32_elem(nz + kz * kz_mult) : 0.f;
+                auto s = (has_scale) ? scales_m.get_f32_elem(ns + ks * ks_mult)
+                                     : 1.f;
+                t[k * N + n] = s * (t[k * N + n] - z);
+            }
     }
 }
 
@@ -164,54 +192,56 @@ void compute_ref(
     const int64_t MB = prb->mb;
     const int64_t IC = prb->ic;
     const int64_t OC = prb->oc;
-    const bool is_3d = prb->ndims == 3;
 
-    // Intermediate buffers match input ndims.
-    const dims_t inter_dims = is_3d ? dims_t {MB, 1, OC} : dims_t {MB, OC};
-    auto up_result = make_mem(eng, inter_dims);
-    auto gate_result = make_mem(eng, inter_dims);
+    // f32 memories for intermediate results.
+    auto dims = (src_m.ndims() == 2) ? dims_t {MB, OC} : dims_t {MB, 1, OC};
+    auto up_result = make_mem(eng, dims);
+    auto gate_result = make_mem(eng, dims);
 
     // Dequantize if quantization attributes are set.
     const auto &attr = prb->attr;
-    auto dequant = [&](const dnn_mem_t &m, const dims_t &buf_dims, int64_t K,
-                           int64_t N, int arg) {
+    auto dequant = [&](const dnn_mem_t &buf, int64_t K, int64_t N, int arg) {
         const bool has_scale = !attr.scales.get(arg).is_def();
         const bool has_zp = !attr.zero_points.get(arg).is_def();
         if (!has_scale && !has_zp) return dnn_mem_t();
 
-        const dnn_mem_t &sc = args.find(DNNL_ARG_ATTR_SCALES | arg);
-        const dnn_mem_t &zp = args.find(DNNL_ARG_ATTR_ZERO_POINTS | arg);
-        const int sc_mask = attr.scales.get_mask(
-                arg, dnnl_undefined_primitive, 2 /*ndims*/);
-        const int zp_mask = has_zp
-                ? attr.zero_points.get_mask(arg, dnnl_undefined_primitive, 2)
-                : 0;
-        const auto &sc_groups = attr.scales.get(arg).groups;
-        const auto &zp_groups = has_zp ? attr.zero_points.get(arg).groups
-                                       : std::vector<dnnl_dim_t> {};
-        auto retn = make_mem(eng, buf_dims);
-        std::memcpy((float *)retn, (float *)m, K * N * sizeof(float));
-        dequantize_2d((float *)retn, K, N, sc, zp, has_scale, has_zp, sc_mask,
-                zp_mask, sc_groups, zp_groups);
+        const auto &sc_groups = (has_scale) ? attr.scales.get(arg).groups
+                                            : std::vector<dnnl_dim_t> {};
+        const auto &zp_groups = (has_zp) ? attr.zero_points.get(arg).groups
+                                         : std::vector<dnnl_dim_t> {};
+
+        const auto md_dims = args.find(arg).dims();
+        const dims_t dims(md_dims, md_dims + args.find(arg).ndims());
+
+        const auto undef = dnnl_undefined_primitive;
+        const int sc_mask = (has_scale) ? attr.scales.get_mask(arg, undef,
+                                                  static_cast<int>(dims.size()))
+                                        : 0;
+        const int zp_mask = (has_zp) ? attr.zero_points.get_mask(arg, undef,
+                                               static_cast<int>(dims.size()))
+                                     : 0;
+
+        auto retn = make_mem(eng, dims);
+        std::memcpy((float *)retn, (float *)buf, K * N * sizeof(float));
+        dequantize_buf(retn, K, N, has_scale, sc_mask, sc_groups,
+                args.find(DNNL_ARG_ATTR_SCALES | arg), has_zp, zp_mask,
+                zp_groups, args.find(DNNL_ARG_ATTR_ZERO_POINTS | arg),
+                arg == DNNL_ARG_SRC);
         return retn;
     };
 
-    auto src_ref = dequant(src_m, prb->src_dims, MB, IC, DNNL_ARG_SRC);
-    auto w_gate_ref = dequant(
-            w_gate_m, prb->w_gate_dims, IC, OC, DNNL_ARG_WEIGHTS_GATE);
-    auto w_up_ref
-            = dequant(w_up_m, prb->w_up_dims, IC, OC, DNNL_ARG_WEIGHTS_UP);
-    auto w_down_ref = dequant(
-            w_down_m, prb->w_down_dims, OC, IC, DNNL_ARG_WEIGHTS_DOWN);
-
-    const dnn_mem_t &src = src_ref ? src_ref : src_m;
+    auto src_ref = dequant(src_m, IC, MB, DNNL_ARG_SRC);
+    auto w_gate_ref = dequant(w_gate_m, IC, OC, DNNL_ARG_WEIGHTS_GATE);
+    auto w_up_ref = dequant(w_up_m, IC, OC, DNNL_ARG_WEIGHTS_UP);
+    auto w_down_ref = dequant(w_down_m, OC, IC, DNNL_ARG_WEIGHTS_DOWN);
 
     // Step 1: up_result = matmul(src, W_up).
-    exec_matmul(eng, strm, src, (w_up_ref) ? w_up_ref : w_up_m, up_result);
+    exec_matmul(eng, strm, (src_ref) ? src_ref : src_m,
+            (w_up_ref) ? w_up_ref : w_up_m, up_result);
 
     // Step 2: gate_result = matmul(src, W_gate).
-    exec_matmul(
-            eng, strm, src, (w_gate_ref) ? w_gate_ref : w_gate_m, gate_result);
+    exec_matmul(eng, strm, (src_ref) ? src_ref : src_m,
+            (w_gate_ref) ? w_gate_ref : w_gate_m, gate_result);
 
     // Step 3: gate_result = activation(gate_result).
     exec_eltwise(eng, strm, gate_result, prb->activation);
