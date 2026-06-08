@@ -4,7 +4,7 @@
 --batch=shapes_basic
 
 --reset
---dt=f16
+--dt=f16,bf16
 --batch=shapes_llm
 
 # Quantized weights: u4 with grouped scales (group_size=128)
@@ -29,3 +29,13 @@
 --attr-zero-points=wei:per_dim_01:s4:128x1+wei_up:per_dim_01:s4:128x1+wei_down:per_dim_01:s4:128x1
 64x128x4864
 64x896x4864
+
+# Quantized bf16 weights: exercises abs_trh with bf16 epsilon (larger tolerance)
+--reset
+--dt=bf16:u4:u4:u4:bf16
+--stag=ab
+--wtag=ba
+--dtag=ab
+--attr-fpmath=any:true
+--attr-scales=wei:per_dim_01:bf16:128x1+wei_up:per_dim_01:bf16:128x1+wei_down:per_dim_01:bf16:128x1
+64x128x4864

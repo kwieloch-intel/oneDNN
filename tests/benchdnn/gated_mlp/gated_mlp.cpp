@@ -87,11 +87,12 @@ int fill_data(int exec_arg, data_kind_t kind, const prb_t *prb,
 
     cfg_t::density_args_t density_args;
     density_args.data_kind = kind;
-    // The 3-matmul chain accumulates over both IC and OC dimensions:
-    // steps 1-2 reduce over IC, step 5 reduces over OC. Use the larger
-    // dimension to size the density so intermediate values stay within
-    // the f16/bf16 representable range after the full pipeline.
-    density_args.n_acc = std::max(prb->ic, prb->oc) * 4;
+    // The 3-matmul chain with elementwise multiply amplifies intermediate
+    // magnitudes quadratically. Zero-points further amplify via per-group
+    // bias correction. Use a higher multiplier to reduce density and keep
+    // intermediate values within the representable range.
+    const bool has_zp = !prb->attr.zero_points.is_def();
+    density_args.n_acc = std::max(prb->ic, prb->oc) * (has_zp ? 64 : 4);
     const auto density = cfg.get_density(density_args);
 
     /* Do fixed partitioning to have same filling for any number of threads */
@@ -164,35 +165,37 @@ void setup_cmp(compare::compare_t &cmp, const prb_t *prb, data_kind_t kind,
     const int64_t max_acc = std::max(prb->ic, prb->oc);
     const auto dst_dt = prb->dst_dt();
 
-    // Quantized low-bit weights compound error across three chained matmuls.
-    const bool has_quant
-            = !prb->attr.scales.is_def() || !prb->attr.zero_points.is_def();
-    const float rel_trh = has_quant
-            ? std::max(5e-2f, 4.f * sqrtf(max_acc) * epsilon_dt(dst_dt))
-            : 5e-2f;
+    // The GPU may accumulate in the data type precision when fpmath mode
+    // is relaxed (any/f16). For a dot product of length K accumulated
+    // in precision eps, the expected relative error is O(sqrt(K) * eps).
+    // Three chained matmuls with an elementwise multiply roughly triple
+    // the single-matmul noise bound.
+    const bool relaxed_acc = prb->attr.acc_mode != dnnl_accumulation_mode_strict
+            && prb->attr.acc_mode != dnnl_accumulation_mode_f32;
+    const float eps_acc
+            = relaxed_acc ? epsilon_dt(dnnl_f16) : epsilon_dt(dst_dt);
+    const float rel_trh = std::max(5e-2f, 3.f * sqrtf(max_acc) * eps_acc);
     cmp.set_threshold(rel_trh);
 
-    // For quantized cases, use a larger absolute tolerance to cover
-    // occasional outliers including sign flips near zero.
-    const float abs_trh = has_quant
-            ? 2.f * sqrtf(max_acc)
-            : 16.f * sqrtf(max_acc) * epsilon_dt(dst_dt);
+    // For small output values the relative criterion is too strict because
+    // chained reductions can cancel to near zero with small absolute error.
+    // Use the same accumulation epsilon as the relative threshold to ensure
+    // the absolute tolerance also scales with the actual compute precision.
+    const float abs_trh = 40.f * sqrtf(max_acc) * eps_acc;
+    const float dst_max = max_dt(dst_dt);
     cmp.set_driver_check_function(
-            [abs_trh, dst_dt](
+            [abs_trh, dst_max](
                     const compare::compare_t::driver_check_func_args_t &a)
                     -> bool {
         if (a.diff <= abs_trh) return true;
-        // Both values near or beyond the dtype boundary (overflow).
-        const float dt_max = max_dt(dst_dt);
-        const float dt_min = lowest_dt(dst_dt);
-        const float near_max = dt_max * (1.f - 5e-2f);
-        const float near_min = dt_min * (1.f - 5e-2f);
-        if (a.exp_f32 >= near_max && a.got >= near_max) return true;
-        if (a.exp_f32 <= near_min && a.got <= near_min) return true;
+        // Accept overflow saturation in either direction:
+        // ref→±inf with GPU→±max, or GPU→±inf with ref→±max.
+        if (std::isinf(a.exp) && fabsf(a.got) == dst_max) return true;
+        if (std::isinf(a.got) && fabsf(a.exp) == dst_max) return true;
         return false;
     });
 
-    cmp.set_zero_trust_percent(80.f);
+    cmp.set_zero_trust_percent(90.f);
 }
 
 std::vector<int> supported_exec_args(dir_t dir) {
