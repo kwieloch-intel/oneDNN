@@ -42,22 +42,29 @@ namespace {
 
 // Execute a matmul primitive on CPU: dst = src x wei.
 void exec_matmul(dnnl_engine_t eng, dnnl_stream_t strm, const dnn_mem_t &src,
-        const dnn_mem_t &wei, const dnn_mem_t &dst) {
+        const dnn_mem_t &wei, const dnn_mem_t &dst, const args_t &all_args,
+        const_dnnl_primitive_attr_t attr = nullptr) {
     dnnl_primitive_desc_t pd {};
     DNN_SAFE_V(dnnl_matmul_primitive_desc_create(
-            &pd, eng, src.md_, wei.md_, nullptr, dst.md_, nullptr));
+            &pd, eng, src.md_, wei.md_, nullptr, dst.md_, attr));
     auto pd_w = make_benchdnn_dnnl_wrapper(pd);
 
     dnnl_primitive_t prim {};
     DNN_SAFE_V(dnnl_primitive_create(&prim, pd));
     auto prim_w = make_benchdnn_dnnl_wrapper(prim);
 
-    dnnl_exec_arg_t args[] = {
+    std::vector<dnnl_exec_arg_t> args = {
             {DNNL_ARG_SRC, src.m_},
             {DNNL_ARG_WEIGHTS, wei.m_},
             {DNNL_ARG_DST, dst.m_},
     };
-    DNN_SAFE_V(dnnl_primitive_execute(prim, strm, 3, args));
+    for (int p = 0, pl = 32 * !!attr; p < pl; p++) {
+        auto idx = DNNL_ARG_ATTR_MULTIPLE_POST_OP(p) | DNNL_ARG_SRC_1;
+        auto &maybe_buf = all_args.find(idx);
+        if (maybe_buf) args.emplace_back(dnnl_exec_arg_t {idx, maybe_buf.m_});
+    }
+    DNN_SAFE_V(dnnl_primitive_execute(
+            prim, strm, static_cast<int>(args.size()), args.data()));
     DNN_SAFE_V(dnnl_stream_wait(strm));
 }
 
@@ -237,11 +244,11 @@ void compute_ref(
 
     // Step 1: up_result = matmul(src, W_up).
     exec_matmul(eng, strm, (src_ref) ? src_ref : src_m,
-            (w_up_ref) ? w_up_ref : w_up_m, up_result);
+            (w_up_ref) ? w_up_ref : w_up_m, up_result, args);
 
     // Step 2: gate_result = matmul(src, W_gate).
     exec_matmul(eng, strm, (src_ref) ? src_ref : src_m,
-            (w_gate_ref) ? w_gate_ref : w_gate_m, gate_result);
+            (w_gate_ref) ? w_gate_ref : w_gate_m, gate_result, args);
 
     // Step 3: gate_result = activation(gate_result).
     exec_eltwise(eng, strm, gate_result, prb->activation);
@@ -250,8 +257,17 @@ void compute_ref(
     exec_binary(eng, strm, up_result, gate_result, dnnl_binary_mul);
 
     // Step 5: dst = matmul(up_result, W_down).
-    exec_matmul(
-            eng, strm, up_result, (w_down_ref) ? w_down_ref : w_down_m, dst_m);
+    attr_t down_attr;
+    down_attr.post_ops = prb->attr.post_ops;
+    for (auto &po : down_attr.post_ops.entry)
+        if (po.is_binary_kind()) po.binary.src1_dt = dnnl_f32;
+    attr_args_t attr_args;
+    attr_args.prepare_post_ops_mds(
+            down_attr, dst_m.ndims(), dst_m.dims(), dnnl_matmul);
+    auto dnnl_attr = make_benchdnn_dnnl_wrapper(
+            create_dnnl_attr(down_attr, attr_args, prb->ndims));
+    exec_matmul(eng, strm, up_result, (w_down_ref) ? w_down_ref : w_down_m,
+            dst_m, args, dnnl_attr);
 
     DNN_SAFE_V(dnnl_stream_destroy(strm));
 }

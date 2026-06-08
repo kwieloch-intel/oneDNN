@@ -56,8 +56,12 @@ dnnl_status_t init_pd(init_pd_args_t<prb_t> &init_pd_args) {
     auto w_down_d = create_md(prb->w_down_dims, w_down_dt, prb->wtag);
     auto dst_d = create_md(prb->dst_dims, dst_dt, prb->dtag);
 
+    attr_args_t attr_args;
+    attr_args.prepare_post_ops_mds(prb->attr,
+            static_cast<int>(prb->dst_dims.size()), prb->dst_dims.data(),
+            dnnl_matmul);
     auto dnnl_attr = make_benchdnn_dnnl_wrapper(
-            create_dnnl_attr(prb->attr, attr_args_t(), prb->ndims));
+            create_dnnl_attr(prb->attr, attr_args, prb->ndims));
 
     TIME_C_PD(DNN_SAFE_STATUS(dnnl_gated_mlp_primitive_desc_create(
             &init_pd_args.pd, init_pd_args.engine, src_d, w_gate_d, w_up_d,
@@ -238,7 +242,12 @@ int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
                 SAFE(fill_data(exec_arg, WEI, prb, cfg, mem, ref_mem, res),
                         WARN);
                 break;
-            case DNNL_ARG_DST: break;
+            case DNNL_ARG_DST:
+                if (prb->attr.post_ops.find(attr_t::post_ops_t::SUM) >= 0) {
+                    SAFE(fill_data(exec_arg, DST, prb, cfg, mem, ref_mem, res),
+                            WARN);
+                }
+                break;
             default:
                 SAFE(init_ref_memory_args_default_case(
                              exec_arg, mem, ref_mem, prb->attr, res),
