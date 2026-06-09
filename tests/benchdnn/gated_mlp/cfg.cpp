@@ -50,23 +50,25 @@ float cfg_t::get_density(const cfg_t::density_args_t &density_args) const {
 cfg_t::cfg_entry_t::cfg_map_t cfg_t::get_cfg_map(data_kind_t kind) const {
     // Source tensor ranges, kept small to prevent overflow in the chained
     // matmul pipeline (3 matmuls with an element-wise multiply in between).
+    // The quadratic amplification from up*gate means ranges must be tighter
+    // than a single matmul driver to avoid exceeding representable precision.
     static const cfg_t::cfg_entry_t::cfg_map_t src_cfg_map = {
-            {{dnnl_f32}, {-2, 2}},
+            {{dnnl_f32}, {-1, 1}},
             {{dnnl_bf16}, {-1, 1}},
             {{dnnl_f16}, {-1, 1}},
-            {{dnnl_s8}, {-2, 2}},
-            {{dnnl_u8}, {0, 4}},
+            {{dnnl_s8}, {-1, 1}},
+            {{dnnl_u8}, {0, 2}},
             {{dnnl_s4}, {-1, 1}},
             {{dnnl_u4}, {0, 2}},
     };
 
     // Weight tensor ranges, small to control accumulation magnitude.
     static const cfg_t::cfg_entry_t::cfg_map_t wei_cfg_map = {
-            {{dnnl_f32}, {-2, 2}},
+            {{dnnl_f32}, {-1, 1}},
             {{dnnl_bf16}, {-1, 1}},
             {{dnnl_f16}, {-1, 1}},
-            {{dnnl_s8}, {-2, 2}},
-            {{dnnl_u8}, {0, 4}},
+            {{dnnl_s8}, {-1, 1}},
+            {{dnnl_u8}, {0, 2}},
             {{dnnl_s4}, {-1, 1}},
             {{dnnl_u4}, {0, 2}},
     };

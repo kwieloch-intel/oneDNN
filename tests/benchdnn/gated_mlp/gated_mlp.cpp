@@ -179,9 +179,11 @@ void setup_cmp(compare::compare_t &cmp, const prb_t *prb, data_kind_t kind,
 
     // For small output values the relative criterion is too strict because
     // chained reductions can cancel to near zero with small absolute error.
-    // Use the same accumulation epsilon as the relative threshold to ensure
-    // the absolute tolerance also scales with the actual compute precision.
-    const float abs_trh = 40.f * sqrtf(max_acc) * eps_acc;
+    // The 3-matmul chain propagates error as: intermediate error (~sqrt(IC)*eps)
+    // gets amplified through the element-wise multiply and then accumulated
+    // over OC in the final matmul, giving total ~sqrt(OC)*sqrt(IC)*eps.
+    const float min_acc = std::min(prb->ic, prb->oc);
+    const float abs_trh = 40.f * sqrtf(max_acc) * sqrtf(min_acc) * eps_acc;
     const float dst_max = max_dt(dst_dt);
     cmp.set_driver_check_function(
             [abs_trh, dst_max](
