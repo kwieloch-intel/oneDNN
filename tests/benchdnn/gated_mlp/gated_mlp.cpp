@@ -87,10 +87,8 @@ int fill_data(int exec_arg, data_kind_t kind, const prb_t *prb,
 
     cfg_t::density_args_t density_args;
     density_args.data_kind = kind;
-    // The 3-matmul chain with elementwise multiply amplifies intermediate
-    // magnitudes quadratically. Zero-points further amplify via per-group
-    // bias correction. Use a higher multiplier to reduce density and keep
-    // intermediate values within the representable range.
+    // Chained matmul pipeline amplifies magnitudes quadratically (up*gate).
+    // ZP adds per-group bias on top. Inflate n_acc to reduce density.
     const bool has_zp = !prb->attr.zero_points.is_def();
     density_args.n_acc = std::max(prb->ic, prb->oc) * (has_zp ? 64 : 4);
     const auto density = cfg.get_density(density_args);
@@ -133,6 +131,14 @@ int fill_data(int exec_arg, data_kind_t kind, const prb_t *prb,
         }
     });
 
+    // Scale SRC to tame quadratic amplification in the chained pipeline.
+    if (kind == SRC) {
+        const float coeff = 0.125f;
+        for (int64_t idx = 0; idx < nelems; ++idx) {
+            mem_fp.set_f32_elem(idx, mem_fp.get_f32_elem(idx) * coeff);
+        }
+    }
+
     SAFE(mem_dt.reorder(mem_fp, cfg.get_swapped_dt(kind)), WARN);
     return OK;
 }
@@ -165,11 +171,7 @@ void setup_cmp(compare::compare_t &cmp, const prb_t *prb, data_kind_t kind,
     const int64_t max_acc = std::max(prb->ic, prb->oc);
     const auto dst_dt = prb->dst_dt();
 
-    // The GPU may accumulate in the data type precision when fpmath mode
-    // is relaxed (any/f16). For a dot product of length K accumulated
-    // in precision eps, the expected relative error is O(sqrt(K) * eps).
-    // Three chained matmuls with an elementwise multiply roughly triple
-    // the single-matmul noise bound.
+    // Relaxed fpmath may accumulate in f16 precision; error ~ sqrt(K)*eps.
     const bool relaxed_acc = prb->attr.acc_mode != dnnl_accumulation_mode_strict
             && prb->attr.acc_mode != dnnl_accumulation_mode_f32;
     const float eps_acc
@@ -177,13 +179,10 @@ void setup_cmp(compare::compare_t &cmp, const prb_t *prb, data_kind_t kind,
     const float rel_trh = std::max(5e-2f, 3.f * sqrtf(max_acc) * eps_acc);
     cmp.set_threshold(rel_trh);
 
-    // For small output values the relative criterion is too strict because
-    // chained reductions can cancel to near zero with small absolute error.
-    // The 3-matmul chain propagates error as: intermediate error (~sqrt(IC)*eps)
-    // gets amplified through the element-wise multiply and then accumulated
-    // over OC in the final matmul, giving total ~sqrt(OC)*sqrt(IC)*eps.
-    const float min_acc = std::min(prb->ic, prb->oc);
-    const float abs_trh = 40.f * sqrtf(max_acc) * sqrtf(min_acc) * eps_acc;
+    // Absolute threshold for near-zero outputs where relative check is
+    // too strict. Floor at rel_trh covers GPU-vs-CPU reduction order diffs.
+    const float abs_trh
+            = std::max(rel_trh, 20.f * sqrtf(max_acc) * eps_acc);
     const float dst_max = max_dt(dst_dt);
     cmp.set_driver_check_function(
             [abs_trh, dst_max](

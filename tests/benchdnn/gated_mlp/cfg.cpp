@@ -48,10 +48,7 @@ float cfg_t::get_density(const cfg_t::density_args_t &density_args) const {
 }
 
 cfg_t::cfg_entry_t::cfg_map_t cfg_t::get_cfg_map(data_kind_t kind) const {
-    // Source tensor ranges, kept small to prevent overflow in the chained
-    // matmul pipeline (3 matmuls with an element-wise multiply in between).
-    // The quadratic amplification from up*gate means ranges must be tighter
-    // than a single matmul driver to avoid exceeding representable precision.
+    // Tight ranges for chained pipeline. SRC is further scaled in fill.
     static const cfg_t::cfg_entry_t::cfg_map_t src_cfg_map = {
             {{dnnl_f32}, {-1, 1}},
             {{dnnl_bf16}, {-1, 1}},
