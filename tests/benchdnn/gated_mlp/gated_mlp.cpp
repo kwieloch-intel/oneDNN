@@ -181,8 +181,7 @@ void setup_cmp(compare::compare_t &cmp, const prb_t *prb, data_kind_t kind,
 
     // Absolute threshold for near-zero outputs where relative check is
     // too strict. Floor at rel_trh covers GPU-vs-CPU reduction order diffs.
-    const float abs_trh
-            = std::max(rel_trh, 20.f * sqrtf(max_acc) * eps_acc);
+    const float abs_trh = std::max(rel_trh, 20.f * sqrtf(max_acc) * eps_acc);
     const float dst_max = max_dt(dst_dt);
     cmp.set_driver_check_function(
             [abs_trh, dst_max](
