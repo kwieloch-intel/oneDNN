@@ -50,9 +50,10 @@ by OpenVINO networks:
 
 ## Quantization Attributes
 
-The driver supports `--attr-scales` and `--attr-zero-points` for weight
-dequantization. Supported argument names are `wei`, `wei_up`, and `wei_down`,
-corresponding to the gate, up, and down projection weights.
+The driver supports `--attr-scales` and `--attr-zero-points` for input and
+weight dequantization. Supported argument names are `src` (for quantized
+activations), `wei`, `wei_up`, and `wei_down` (corresponding to the gate, up,
+and down projection weights).
 
 Supported policies:
 - `common` -- single scale/zero-point shared across the entire tensor.
@@ -73,6 +74,26 @@ Example: grouped quantization with groups along the K-dimension:
                --attr-scales=wei:per_dim_01:f32:32x1+wei_up:per_dim_01:f32:32x1+wei_down:per_dim_01:f32:32x1 \
                --attr-zero-points=wei:per_dim_01:s4:32x1+wei_up:per_dim_01:s4:32x1+wei_down:per_dim_01:s4:32x1 \
                64x128x256
+```
+
+Example: INT8 SRC with per-tensor SRC scale and quantized weights:
+``` sh
+    ./benchdnn --gated_mlp --dt=s8:u4:u4:u4:f16 \
+               --attr-scales=src:common:f16+wei:per_dim_01:f16:128x1+wei_up:per_dim_01:f16:128x1+wei_down:per_dim_01:f16:128x1 \
+               64x256x4864
+```
+
+## Post-ops
+
+The driver supports post-ops applied to the final (down) matmul output.
+Supported kinds include `sum`, `eltwise`, and `binary`.
+
+Example: binary add post-op:
+``` sh
+    ./benchdnn --gated_mlp --dt=f16:u4:u4:u4:f16 \
+               --attr-scales=wei:per_dim_01:f16:128x1+wei_up:per_dim_01:f16:128x1+wei_down:per_dim_01:f16:128x1 \
+               --attr-post-ops=binary_add:f16:2:ab \
+               64x128x4864
 ```
 
 ## Essence of Testing

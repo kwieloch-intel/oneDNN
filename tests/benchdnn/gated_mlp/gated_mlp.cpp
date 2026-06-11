@@ -132,7 +132,8 @@ int fill_data(int exec_arg, data_kind_t kind, const prb_t *prb,
     });
 
     // Scale SRC to tame quadratic amplification in the chained pipeline.
-    if (kind == SRC) {
+    // For int types this is done through scales instead (see below).
+    if (kind == SRC && !is_integral_dt(cfg.get_dt(kind))) {
         const float coeff = 0.125f;
         for (int64_t idx = 0; idx < nelems; ++idx) {
             mem_fp.set_f32_elem(idx, mem_fp.get_f32_elem(idx) * coeff);
@@ -252,6 +253,20 @@ int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
                 }
                 break;
             default:
+                // For int SRC types, multiply SRC scales by coeff to prevent
+                // overflow (buffer multiply would round to zero for integers).
+                if ((exec_arg & DNNL_ARG_ATTR_SCALES)
+                        && (exec_arg ^ DNNL_ARG_ATTR_SCALES) == DNNL_ARG_SRC) {
+                    const float coeff = 0.125f;
+                    dnn_mem_t null;
+                    SAFE(fill_scales(prb->attr, DNNL_ARG_SRC, null, ref_mem),
+                            WARN);
+                    for (int64_t i = 0; i < ref_mem.nelems(); i++)
+                        ref_mem.set_f32_elem(
+                                i, ref_mem.get_f32_elem(i) * coeff);
+                    SAFE(mem.reorder(ref_mem), WARN);
+                    break;
+                }
                 SAFE(init_ref_memory_args_default_case(
                              exec_arg, mem, ref_mem, prb->attr, res),
                         WARN);
