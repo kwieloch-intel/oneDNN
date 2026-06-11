@@ -253,19 +253,28 @@ int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
                 }
                 break;
             default:
-                // For int SRC types, multiply SRC scales by coeff to prevent
-                // overflow (buffer multiply would round to zero for integers).
-                if ((exec_arg & DNNL_ARG_ATTR_SCALES)
-                        && (exec_arg ^ DNNL_ARG_ATTR_SCALES) == DNNL_ARG_SRC) {
-                    const float coeff = 0.125f;
-                    dnn_mem_t null;
-                    SAFE(fill_scales(prb->attr, DNNL_ARG_SRC, null, ref_mem),
-                            WARN);
-                    for (int64_t i = 0; i < ref_mem.nelems(); i++)
-                        ref_mem.set_f32_elem(
-                                i, ref_mem.get_f32_elem(i) * coeff);
-                    SAFE(mem.reorder(ref_mem), WARN);
-                    break;
+                // Apply coeff to scales to prevent overflow. For int SRC
+                // without own scales, go through WEI gate/up scales instead.
+                if (exec_arg & DNNL_ARG_ATTR_SCALES) {
+                    const int true_arg = exec_arg ^ DNNL_ARG_ATTR_SCALES;
+                    const bool is_src_scale = (true_arg == DNNL_ARG_SRC);
+                    const bool int_src_no_scale = is_integral_dt(prb->src_dt())
+                            && prb->attr.scales.get(DNNL_ARG_SRC).is_def();
+                    const bool is_gate_up_scale
+                            = (true_arg == DNNL_ARG_WEIGHTS_GATE
+                                    || true_arg == DNNL_ARG_WEIGHTS_UP);
+                    if (is_src_scale
+                            || (int_src_no_scale && is_gate_up_scale)) {
+                        const float coeff = 0.125f;
+                        dnn_mem_t null;
+                        SAFE(fill_scales(prb->attr, true_arg, null, ref_mem),
+                                WARN);
+                        for (int64_t i = 0; i < ref_mem.nelems(); i++)
+                            ref_mem.set_f32_elem(
+                                    i, ref_mem.get_f32_elem(i) * coeff);
+                        SAFE(mem.reorder(ref_mem), WARN);
+                        break;
+                    }
                 }
                 SAFE(init_ref_memory_args_default_case(
                              exec_arg, mem, ref_mem, prb->attr, res),

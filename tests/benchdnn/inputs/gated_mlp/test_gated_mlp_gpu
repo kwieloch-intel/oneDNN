@@ -51,6 +51,16 @@
 64x128x4864
 64x256x4864
 
+# INT8 SRC without SRC scale (coeff applied through WEI gate/up scales)
+--reset
+--dt=s8:u4:u4:u4:f16
+--stag=ab
+--wtag=ba
+--dtag=ab
+--attr-fpmath=any:true
+--attr-scales=wei:per_dim_01:f16:128x1+wei_up:per_dim_01:f16:128x1+wei_down:per_dim_01:f16:128x1
+64x128x4864
+
 # Binary post-ops on the down matmul
 --reset
 --dt=f16:u4:u4:u4:f16
