@@ -132,7 +132,12 @@ bool matches(const kcatalog::Entry &e, const MatchParams &p)
     }
 
     ok = ok && (e.driverInfo.unroll[LoopM] % p.unrollReq[LoopM] == 0);
-    ok = ok && (e.driverInfo.unroll[LoopN] % p.unrollReq[LoopN] == 0);
+    // A single output column has nothing to byte-pack, so the sub-byte
+    // quantization parameter requirement cannot apply. Scoped to n == 1
+    // deliberately; relaxing it everywhere exposes unvalidated cost models.
+    int unrollReqN = p.unrollReq[LoopN];
+    if (!p.ignoreSizes && p.sizes.n == 1) unrollReqN = 1;
+    ok = ok && (e.driverInfo.unroll[LoopN] % unrollReqN == 0);
     ok = ok && (e.driverInfo.unroll[LoopK] % p.unrollReq[LoopK] == 0);
 
     for (int i = 0; i < p.nExtraReqs; i++)
