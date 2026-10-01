@@ -132,7 +132,22 @@ bool matches(const kcatalog::Entry &e, const MatchParams &p)
     }
 
     ok = ok && (e.driverInfo.unroll[LoopM] % p.unrollReq[LoopM] == 0);
-    ok = ok && (e.driverInfo.unroll[LoopN] % p.unrollReq[LoopN] == 0);
+    // A single output column cannot be unrolled eight at a time. The n
+    // requirement comes from packing sub-byte quantization parameters a byte at
+    // a time, which has nothing to ask for when there is one column, and
+    // imposing it anyway rejects every narrow kernel a GEMV could use.
+    //
+    // Deliberately scoped to n == 1 rather than fixed where the requirement is
+    // raised. It is also raised for quantization parameters that do not exist:
+    // Tao and Tbo are left default-constructed when unused, and a default Type
+    // reports one bit per element, so isSubByte() holds for every quantized
+    // problem. Dropping it there as well was measured on a 4 Xe-core part - it
+    // makes 48 previously unreachable u2 entries eligible, whose cost models
+    // were never validated because nothing could select them, and prefill
+    // regresses by up to 2.7x. That is left alone here and reported separately.
+    int unrollReqN = p.unrollReq[LoopN];
+    if (!p.ignoreSizes && p.sizes.n == 1) unrollReqN = 1;
+    ok = ok && (e.driverInfo.unroll[LoopN] % unrollReqN == 0);
     ok = ok && (e.driverInfo.unroll[LoopK] % p.unrollReq[LoopK] == 0);
 
     for (int i = 0; i < p.nExtraReqs; i++)
