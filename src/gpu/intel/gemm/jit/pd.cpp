@@ -783,15 +783,19 @@ status_t pd_t::init_GEMMProblem(
     // Mixed s8/s4 DPAS support:
     // - Xe3p: Not supported, require s4->s8 upconversion
     // - pre-Xe3p: supported, but only when s4 matrix doesn't have zero points
+    // 2-bit integers are always upconverted to s8: left as 2-bit, a zero point
+    // cannot be applied during the upconversion and would need group sums.
     bool has_s8s4_dpas = getCore(problem.product.family) != ngen::HW::Xe3p;
-    if (problem.Ta_ext.isInteger() && (problem.Ta_ext.bits() == 4)
+    if (problem.Ta_ext.isInteger() && (problem.Ta_ext.bits() <= 4)
             && problem.Tb_ext.isInt8()) {
-        bool s8s4_dpas_ok = has_s8s4_dpas && (a_quant.zp_ndims < 0);
+        bool s8s4_dpas_ok = has_s8s4_dpas && (problem.Ta_ext.bits() == 4)
+                && (a_quant.zp_ndims < 0);
         if (!s8s4_dpas_ok) problem.Ta = Type::s8;
     }
-    if (problem.Tb_ext.isInteger() && (problem.Tb_ext.bits() == 4)
+    if (problem.Tb_ext.isInteger() && (problem.Tb_ext.bits() <= 4)
             && problem.Ta_ext.isInt8()) {
-        bool s8s4_dpas_ok = has_s8s4_dpas && (b_quant.zp_ndims < 0);
+        bool s8s4_dpas_ok = has_s8s4_dpas && (problem.Tb_ext.bits() == 4)
+                && (b_quant.zp_ndims < 0);
         if (!s8s4_dpas_ok) problem.Tb = Type::s8;
     }
 
